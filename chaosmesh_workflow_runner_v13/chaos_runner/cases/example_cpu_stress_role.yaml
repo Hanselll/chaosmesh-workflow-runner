@@ -12,16 +12,24 @@ targets:
     finder: rc_followers
 
 stress:
-  targets:
-    - target: rc_leader
-    - target: rc_followers
-      expand:
-        mode: random
-        count: 1
+  # 全局默认值（可被每个 target 的 cpu 覆盖）
   duration: "20s~40s"
   cpu:
     workers: 2
     load: 75
+
+  targets:
+    - target: rc_leader
+      cpu:
+        workers: 1
+        load: 65
+    - target: rc_followers
+      expand:
+        mode: random
+        count: 1
+      cpu:
+        workers: 2
+        load: 85
 
 wait_seconds: 60
 cleanup: true

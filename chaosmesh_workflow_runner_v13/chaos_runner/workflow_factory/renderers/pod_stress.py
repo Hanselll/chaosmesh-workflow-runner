@@ -44,18 +44,6 @@ def _select_targets(resolved, target_id, expand_cfg):
 
 
 def _resolve_stress_targets(stress_cfg):
-    """
-    Supported forms:
-    - legacy single target:
-      stress.target: <target-id>
-      stress.expand: ...
-
-    - multi-target:
-      stress.targets:
-        - target: <target-id>
-          expand: ...
-        - target: <target-id>
-    """
     targets = stress_cfg.get("targets")
     if targets:
         if not isinstance(targets, list):
@@ -67,76 +55,79 @@ def _resolve_stress_targets(stress_cfg):
             tid = it.get("target")
             if not tid:
                 raise RuntimeError("each stress.targets item must include target")
-            out.append({"target": tid, "expand": it.get("expand")})
+            out.append(it)
         return out
 
-    # backward compatibility
+    # backward compatibility (single target)
     target_id = stress_cfg.get("target")
     if target_id:
-        return [{"target": target_id, "expand": stress_cfg.get("expand")}]
+        one = {
+            "target": target_id,
+            "expand": stress_cfg.get("expand"),
+        }
+        if "cpu" in stress_cfg:
+            one["cpu"] = stress_cfg.get("cpu")
+        if "memory" in stress_cfg:
+            one["memory"] = stress_cfg.get("memory")
+        return [one]
 
     raise RuntimeError("stress.target or stress.targets is required")
 
 
-def _render_cpu(workflow_name, workflow_ns, target_ns, pod_names, deadline, stress_cfg):
-    workers = int(stress_cfg.get("workers", 1))
-    load = int(stress_cfg.get("load", 80))
+def _dedup_pods(pods):
+    seen = set()
+    out = []
+    for p in pods:
+        if p in seen:
+            continue
+        seen.add(p)
+        out.append(p)
+    return out
+
+
+def _cpu_settings(stress_cfg, target_cfg):
+    cfg = (stress_cfg.get("cpu") or {}).copy()
+    cfg.update(target_cfg.get("cpu") or {})
+    workers = int(cfg.get("workers", 1))
+    load = int(cfg.get("load", 80))
     if workers < 1:
         raise RuntimeError("stress.cpu.workers must be >=1")
     if load < 1 or load > 100:
         raise RuntimeError("stress.cpu.load must be in 1..100")
-
-    return """apiVersion: chaos-mesh.org/v1alpha1
-kind: Workflow
-metadata:
-  name: \"{wf}\"
-  namespace: \"{wfn}\"
-spec:
-  entry: {wf}
-  templates:
-    - name: {wf}
-      templateType: StressChaos
-      deadline: {deadline}
-      stressChaos:
-        mode: all
-        selector:
-          namespaces:
-            - {ns}
-          pods:
-            {ns}:
-{pods}
-        stressors:
-          cpu:
-            workers: {workers}
-            load: {load}
-""".format(
-        wf=workflow_name,
-        wfn=workflow_ns,
-        ns=target_ns,
-        deadline=deadline,
-        pods="\n".join(["              - {}".format(p) for p in pod_names]),
-        workers=workers,
-        load=load,
-    )
+    return workers, load
 
 
-def _render_memory(workflow_name, workflow_ns, target_ns, pod_names, deadline, stress_cfg):
-    workers = int(stress_cfg.get("workers", 1))
-    size = str(stress_cfg.get("size", "256MB"))
+def _memory_settings(stress_cfg, target_cfg):
+    cfg = (stress_cfg.get("memory") or {}).copy()
+    cfg.update(target_cfg.get("memory") or {})
+    workers = int(cfg.get("workers", 1))
+    size = str(cfg.get("size", "256MB"))
     if workers < 1:
         raise RuntimeError("stress.memory.workers must be >=1")
+    return workers, size
 
-    return """apiVersion: chaos-mesh.org/v1alpha1
-kind: Workflow
-metadata:
-  name: \"{wf}\"
-  namespace: \"{wfn}\"
-spec:
-  entry: {wf}
-  templates:
-    - name: {wf}
+
+def _render_branch(i, wf_ns, ns, target_cfg, pod_names, duration, mode, stress_cfg):
+    branch_name = "stress-{}".format(i)
+    pods_yaml = "\n".join(["              - {}".format(p) for p in pod_names])
+
+    if mode == "cpu":
+        workers, load = _cpu_settings(stress_cfg, target_cfg)
+        stressor_yaml = """          cpu:
+            workers: {workers}
+            load: {load}
+""".format(workers=workers, load=load)
+    else:
+        workers, size = _memory_settings(stress_cfg, target_cfg)
+        stressor_yaml = """          memory:
+            workers: {workers}
+            size: \"{size}\"
+""".format(workers=workers, size=size)
+
+    return branch_name, """
+    - name: {name}
       templateType: StressChaos
-      deadline: {deadline}
+      deadline: {duration}
       stressChaos:
         mode: all
         selector:
@@ -146,18 +137,8 @@ spec:
             {ns}:
 {pods}
         stressors:
-          memory:
-            workers: {workers}
-            size: \"{size}\"
-""".format(
-        wf=workflow_name,
-        wfn=workflow_ns,
-        ns=target_ns,
-        deadline=deadline,
-        pods="\n".join(["              - {}".format(p) for p in pod_names]),
-        workers=workers,
-        size=size,
-    )
+{stressor}
+""".format(name=branch_name, duration=duration, ns=ns, pods=pods_yaml, stressor=stressor_yaml.rstrip("\n"))
 
 
 def _render(case, resolved, config, mode):
@@ -169,28 +150,39 @@ def _render(case, resolved, config, mode):
     stress = case.get("stress") or {}
     target_defs = _resolve_stress_targets(stress)
 
-    duration = resolve_duration(stress.get("duration", "30s"), field_name="stress.duration", default="30s")
-
-    pod_names = []
-    for item in target_defs:
+    branches = []
+    templates = []
+    for i, item in enumerate(target_defs):
+        duration = resolve_duration(item.get("duration", stress.get("duration", "30s")), field_name="stress.duration", default="30s")
         selected = _select_targets(resolved, item["target"], item.get("expand"))
-        pod_names.extend([x.get("pod") for x in selected if isinstance(x, dict) and x.get("pod")])
+        pod_names = [x.get("pod") for x in selected if isinstance(x, dict) and x.get("pod")]
+        pod_names = _dedup_pods(pod_names)
+        if not pod_names:
+            raise RuntimeError("stress target {} resolves to empty pod list".format(item.get("target")))
 
-    # preserve order while deduplicating
-    seen = set()
-    uniq_pods = []
-    for p in pod_names:
-        if p in seen:
-            continue
-        seen.add(p)
-        uniq_pods.append(p)
+        name, tpl = _render_branch(i, wf_ns, ns, item, pod_names, duration, mode, stress)
+        branches.append(name)
+        templates.append(tpl)
 
-    if not uniq_pods:
-        raise RuntimeError("stress target(s) resolve to empty pod list")
-
-    if mode == "cpu":
-        return _render_cpu(wf_name, wf_ns, ns, uniq_pods, duration, stress.get("cpu") or {})
-    return _render_memory(wf_name, wf_ns, ns, uniq_pods, duration, stress.get("memory") or {})
+    return """apiVersion: chaos-mesh.org/v1alpha1
+kind: Workflow
+metadata:
+  name: \"{wf}\"
+  namespace: \"{wfn}\"
+spec:
+  entry: {wf}
+  templates:
+    - name: {wf}
+      templateType: Parallel
+      children:
+        - {branches}
+{templates}
+""".format(
+        wf=wf_name,
+        wfn=wf_ns,
+        branches="\n        - ".join(branches),
+        templates="".join(templates).rstrip("\n"),
+    )
 
 
 @register("cpu_stress_single_role")

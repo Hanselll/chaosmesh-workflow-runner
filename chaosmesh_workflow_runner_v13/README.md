@@ -547,7 +547,7 @@ cleanup: true
 
 ### 7.5 renderer = `cpu_stress_single_role`
 
-**用途**：对一个或多个指定角色 Pod 同时注入 CPU 压力（StressChaos）。
+**用途**：对一个或多个指定角色 Pod 同时注入 CPU 压力（StressChaos），并支持为每个 target 单独设置 CPU 参数。
 
 ```yaml
 renderer: cpu_stress_single_role
@@ -561,23 +561,33 @@ stress:
   # target: rc_leader
   # expand: all | {mode: random, count: 1} | {indices: [0]}
 
-  # 支持多目标（推荐）：可同时对多个角色注入 stress
-  targets:
-    - target: rc_leader
-    - target: rc_followers
-      expand:
-        mode: random
-        count: 1
-
+  # 全局默认值（可被每个 target 覆盖）
   duration: 30s                 # 支持随机范围："10s~60s" / {min: 10s, max: 60s}
   cpu:
     workers: 2
     load: 80
+
+  # 支持多目标（推荐）：可同时对多个角色注入 stress
+  # 每个 target 可单独设置 cpu 参数
+  targets:
+    - target: rc_leader
+      cpu:
+        workers: 1
+        load: 60
+    - target: rc_followers
+      expand:
+        mode: random
+        count: 1
+      cpu:
+        workers: 2
+        load: 90
 ```
+
+> 说明：`stress.targets[]` 中可选填写 `cpu`/`memory` 和 `duration` 来覆盖全局默认值。
 
 ### 7.6 renderer = `memory_stress_single_role`
 
-**用途**：对一个或多个指定角色 Pod 同时注入内存压力（StressChaos）。
+**用途**：对一个或多个指定角色 Pod 同时注入内存压力（StressChaos），并支持为每个 target 单独设置内存参数。
 
 ```yaml
 renderer: memory_stress_single_role
@@ -587,15 +597,23 @@ targets:
     finder: sdb_master
 
 stress:
-  targets:
-    - target: sdb_master
-    - target: sdb_slaves
-      expand:
-        mode: random
-        count: 1
+  # 全局默认值（可被每个 target 覆盖）
   duration: 45s
   memory:
     workers: 1
     size: 256MB
+
+  targets:
+    - target: sdb_master
+      memory:
+        workers: 1
+        size: 192MB
+    - target: sdb_slaves
+      expand:
+        mode: random
+        count: 1
+      memory:
+        workers: 2
+        size: 384MB
 ```
 
