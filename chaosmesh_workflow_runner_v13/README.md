@@ -195,6 +195,8 @@ v13 内置 renderer：
 - `network_then_parallel_podkill`
 - `network_parallel_containerkill`
 - `podkill_then_network`（旧风格，字段不同）
+- `cpu_stress_single_role`
+- `memory_stress_single_role`
 
 下面给出每类 renderer 的**完整语法**与**典型示例**。
 
@@ -538,4 +540,48 @@ cleanup: true
 - NetworkChaos 支持 `partition`
 - `network.labels` 可不填：自动 fallback 到 resolved pods（精确到 Pod 名）
 - 解决“master/slave label 相同导致误伤整组”的问题（例如只隔离 SDB master）
+
+
+---
+
+
+### 7.5 renderer = `cpu_stress_single_role`
+
+**用途**：对指定角色 Pod 注入 CPU 压力（StressChaos）。
+
+```yaml
+renderer: cpu_stress_single_role
+
+targets:
+  - id: rc_leader
+    finder: rc_leader
+
+stress:
+  target: rc_leader
+  duration: 30s                 # 支持随机范围："10s~60s" / {min: 10s, max: 60s}
+  # 当 target 解析为 list 时可选
+  # expand: all | {mode: random, count: 1} | {indices: [0]}
+  cpu:
+    workers: 2
+    load: 80
+```
+
+### 7.6 renderer = `memory_stress_single_role`
+
+**用途**：对指定角色 Pod 注入内存压力（StressChaos）。
+
+```yaml
+renderer: memory_stress_single_role
+
+targets:
+  - id: sdb_master
+    finder: sdb_master
+
+stress:
+  target: sdb_master
+  duration: 45s
+  memory:
+    workers: 1
+    size: 256MB
+```
 

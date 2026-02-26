@@ -1,0 +1,20 @@
+name: example_cpu_stress_role
+workflow:
+  name: wf-example-cpu-stress-role
+  namespace: default
+
+renderer: cpu_stress_single_role
+
+targets:
+  - id: rc
+    finder: rc_leader
+
+stress:
+  target: rc
+  duration: "20s~40s"
+  cpu:
+    workers: 2
+    load: 75
+
+wait_seconds: 60
+cleanup: true

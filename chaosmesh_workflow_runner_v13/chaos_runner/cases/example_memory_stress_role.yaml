@@ -1,0 +1,22 @@
+name: example_memory_stress_role
+workflow:
+  name: wf-example-memory-stress-role
+  namespace: default
+
+renderer: memory_stress_single_role
+
+targets:
+  - id: sdbm
+    finder: sdb_master
+
+stress:
+  target: sdbm
+  duration:
+    min: 20s
+    max: 60s
+  memory:
+    workers: 1
+    size: 256MB
+
+wait_seconds: 90
+cleanup: true

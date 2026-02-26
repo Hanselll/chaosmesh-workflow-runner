@@ -13,3 +13,5 @@ def build(case, config):
         raise RuntimeError("case.renderer is required")
     wf_yaml = get_renderer(name)(case, resolved, config)
     return wf_yaml, resolved
+
+from chaos_runner.workflow_factory.renderers import pod_stress  # noqa:F401
