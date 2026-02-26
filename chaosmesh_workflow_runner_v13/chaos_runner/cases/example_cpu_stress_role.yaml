@@ -3,7 +3,7 @@ workflow:
   name: wf-example-cpu-stress-role
   namespace: default
 
-renderer: cpu_stress_single_role
+renderer: cpu_stress_parallel
 
 targets:
   - id: rc_leader

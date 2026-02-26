@@ -195,8 +195,8 @@ v13 内置 renderer：
 - `network_then_parallel_podkill`
 - `network_parallel_containerkill`
 - `podkill_then_network`（旧风格，字段不同）
-- `cpu_stress_single_role`
-- `memory_stress_single_role`
+- `cpu_stress_parallel`
+- `memory_stress_parallel`
 
 下面给出每类 renderer 的**完整语法**与**典型示例**。
 
@@ -545,12 +545,12 @@ cleanup: true
 ---
 
 
-### 7.5 renderer = `cpu_stress_single_role`
+### 7.5 renderer = `cpu_stress_parallel`
 
 **用途**：对一个或多个指定角色 Pod 同时注入 CPU 压力（StressChaos），并支持为每个 target 单独设置 CPU 参数。
 
 ```yaml
-renderer: cpu_stress_single_role
+renderer: cpu_stress_parallel
 
 targets:
   - id: rc_leader
@@ -585,12 +585,12 @@ stress:
 
 > 说明：`stress.targets[]` 中可选填写 `cpu`/`memory` 和 `duration` 来覆盖全局默认值。
 
-### 7.6 renderer = `memory_stress_single_role`
+### 7.6 renderer = `memory_stress_parallel`
 
 **用途**：对一个或多个指定角色 Pod 同时注入内存压力（StressChaos），并支持为每个 target 单独设置内存参数。
 
 ```yaml
-renderer: memory_stress_single_role
+renderer: memory_stress_parallel
 
 targets:
   - id: sdb_master

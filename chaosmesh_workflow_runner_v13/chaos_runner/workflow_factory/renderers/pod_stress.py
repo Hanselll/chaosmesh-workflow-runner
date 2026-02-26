@@ -185,11 +185,13 @@ spec:
     )
 
 
+@register("cpu_stress_parallel")
 @register("cpu_stress_single_role")
 def render_cpu_stress(case, resolved, config):
     return _render(case, resolved, config, mode="cpu")
 
 
+@register("memory_stress_parallel")
 @register("memory_stress_single_role")
 def render_memory_stress(case, resolved, config):
     return _render(case, resolved, config, mode="memory")

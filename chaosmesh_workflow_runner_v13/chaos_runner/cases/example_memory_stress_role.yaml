@@ -3,7 +3,7 @@ workflow:
   name: wf-example-memory-stress-role
   namespace: default
 
-renderer: memory_stress_single_role
+renderer: memory_stress_parallel
 
 targets:
   - id: sdbm
