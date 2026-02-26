@@ -187,6 +187,9 @@ v13 内置 renderer：
 - `parallel_podkill`
 - `network_then_parallel_podkill`
 - `network_parallel_containerkill`
+- `parallel_stress`（并行注入 CPU/内存压力）
+- `parallel_cpu_stress`（并行注入 CPU 压力）
+- `parallel_memory_stress`（并行注入内存压力）
 - `podkill_then_network`（旧风格，字段不同）
 
 下面给出每类 renderer 的**完整语法**与**典型示例**。
@@ -456,7 +459,75 @@ cleanup: true
 
 ---
 
-### 7.4 renderer = `podkill_then_network`（旧风格：先 kill 再网络）
+### 7.4 renderer = `parallel_stress` / `parallel_cpu_stress` / `parallel_memory_stress` ✅（按角色单独打 CPU/内存压力）
+
+**用途**：对指定 role 解析出的 Pod 注入 StressChaos，可按 item 选择 `cpu` / `memory` / `both`，并支持每个目标独立 delay/expand。
+
+#### 语法
+
+```yaml
+renderer: parallel_stress   # 或 parallel_cpu_stress / parallel_memory_stress
+
+targets: [...]
+
+stress:
+  mode: cpu                 # case 默认模式；可选 cpu/memory/both
+  deadline: 60s             # 单次 stress 生效时长，支持 60 / "60s"
+  items:
+    - target: <target-id>
+      delay: 0
+      expand: ...           # target 是 list 时必填
+      mode: memory          # 可覆盖默认 mode
+      cpu:                  # mode 包含 cpu 时生效
+        workers: 1
+        load: 100
+      memory:               # mode 包含 memory 时生效
+        workers: 1
+        size: 256MB
+```
+
+#### 示例：仅对 `rc_leader` 注入 CPU 压力；对 `rc_followers` 随机 1 个注入内存压力
+
+```yaml
+name: rc-role-stress
+workflow:
+  name: wf-rc-role-stress
+  namespace: default
+
+renderer: parallel_stress
+
+targets:
+  - id: leader
+    finder: rc_leader
+  - id: followers
+    finder: rc_followers
+
+stress:
+  mode: cpu
+  deadline: 90s
+  items:
+    - target: leader
+      delay: 0
+      cpu:
+        workers: 2
+        load: 80
+    - target: followers
+      mode: memory
+      expand:
+        mode: random
+        count: 1
+      delay: 3s
+      memory:
+        workers: 1
+        size: 512MB
+
+wait_seconds: 120
+cleanup: true
+```
+
+---
+
+### 7.5 renderer = `podkill_then_network`（旧风格：先 kill 再网络）
 
 **用途**：先并行 kill 两个目标（固定写法：kill.targets 里放两个 id），再注入网络 delay+loss。  
 ⚠️ 该 renderer 的 `network` 字段与其他 renderer 不一致，属于历史兼容。

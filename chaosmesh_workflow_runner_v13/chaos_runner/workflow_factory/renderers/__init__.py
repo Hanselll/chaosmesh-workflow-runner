@@ -14,3 +14,5 @@ def get(name):
     return RENDERERS[name]
 from .network_then_parallel_podkill import *
 from . import network_parallel_containerkill
+
+from . import parallel_stress

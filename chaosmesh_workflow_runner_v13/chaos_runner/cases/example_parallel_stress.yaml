@@ -1,0 +1,34 @@
+name: example_parallel_stress
+workflow:
+  name: wf-example-parallel-stress
+  namespace: default
+
+renderer: parallel_stress
+
+targets:
+  - id: rc_leader
+    finder: rc_leader
+  - id: rc_followers
+    finder: rc_followers
+
+stress:
+  mode: cpu
+  deadline: 60s
+  items:
+    - target: rc_leader
+      delay: 0
+      cpu:
+        workers: 2
+        load: 85
+    - target: rc_followers
+      mode: memory
+      expand:
+        mode: random
+        count: 1
+      delay: 2s
+      memory:
+        workers: 1
+        size: 512MB
+
+wait_seconds: 90
+cleanup: true
