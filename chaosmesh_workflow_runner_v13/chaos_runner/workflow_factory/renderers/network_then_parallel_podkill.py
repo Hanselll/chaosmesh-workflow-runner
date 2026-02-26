@@ -2,6 +2,7 @@
 import random
 import re
 from chaos_runner.workflow_factory.renderers import register
+from chaos_runner.workflow_factory.renderers.value_resolver import resolve_duration, resolve_percent
 
 @register("network_then_parallel_podkill")
 def render(case, resolved, config):
@@ -120,8 +121,8 @@ def render(case, resolved, config):
     net_templates = []
 
     if "delay" in actions:
-        lat = str(delay_cfg.get("latency", getattr(config, "NET_DELAY", "100ms")))
-        jit = str(delay_cfg.get("jitter", getattr(config, "NET_JITTER", "10ms")))
+        lat = resolve_duration(delay_cfg.get("latency"), field_name="network.delay.latency", default=getattr(config, "NET_DELAY", "100ms"))
+        jit = resolve_duration(delay_cfg.get("jitter"), field_name="network.delay.jitter", default=getattr(config, "NET_JITTER", "10ms"))
         net_children.append("net-delay")
         net_templates.append("""
     - name: net-delay
@@ -155,7 +156,7 @@ def render(case, resolved, config):
         ))
 
     if "loss" in actions:
-        loss = str(loss_cfg.get("loss", getattr(config, "NET_LOSS", "1")))
+        loss = resolve_percent(loss_cfg.get("loss"), field_name="network.loss.loss", default=getattr(config, "NET_LOSS", "1"))
         corr = str(loss_cfg.get("correlation", getattr(config, "NET_CORR", "0")))
         net_children.append("net-loss")
         net_templates.append("""
@@ -230,26 +231,6 @@ def render(case, resolved, config):
 
     plan = []  # [{pod, delay}, ...]
 
-    def _format_delay(d):
-        """
-        Normalize a delay value into a Chaos Mesh duration string.
-
-        Accepts integers/floats (treated as seconds) or strings. Numeric values
-        are converted to seconds with an 's' suffix. Strings are returned as-is
-        if they already specify a unit (ns/us/ms/s/m/h). Purely numeric strings
-        have an 's' suffix appended.
-        """
-        if d is None or d == "":
-            return "0s"
-        if isinstance(d, (int, float)):
-            return f"{d}s"
-        s = str(d).strip()
-        if re.match(r"^\d+(\.\d+)?$", s):
-            return f"{s}s"
-        if re.match(r"^\d+(\.\d+)?(ns|us|ms|s|m|h)$", s, re.IGNORECASE):
-            return s
-        raise RuntimeError(f"invalid delay value: {d}")
-
     def _is_zero_delay(d):
         """
         Return True if the delay string represents zero time.
@@ -305,7 +286,7 @@ def render(case, resolved, config):
         raw_delay = it.get("delay", 0)
         if raw_delay is None or raw_delay == "":
             raise RuntimeError("delay is empty for target {}".format(tid))
-        delay_sec = _format_delay(raw_delay)
+        delay_sec = resolve_duration(raw_delay, field_name="kill.items.delay")
 
         expand_cfg = it.get("expand")
         val = resolved.get(tid)

@@ -145,11 +145,11 @@ network:
   # action: both             # 等价于 actions: [delay, loss]
 
   delay:
-    latency: 300ms
-    jitter: 10ms
+    latency: 300ms          # 支持随机范围："100ms~500ms" 或 {min: 100ms, max: 500ms}
+    jitter: 10ms            # 支持随机范围
 
   loss:
-    loss: "10"
+    loss: "10"             # 支持随机范围："1~20" 或 {min: 1, max: 20}
     correlation: "0"         # v13 内部字段名是 correlation（旧 case 里写 corr 也常见，但建议统一）
 
   selectors:
@@ -175,10 +175,17 @@ kill:
   items:
     - target: <target-id>
       delay: 0               # 支持 0 / "200ms" / "1s" / 1(秒) / 0.5(秒)
+      # 也支持随机范围："200ms~2s" 或 {min: 200ms, max: 2s}
       expand: ...            # target 是 list 时可用
 ```
 
 ---
+
+
+> 新增：`kill.items[].delay`、`network.delay.latency`、`network.delay.jitter`、`network.loss.loss` 均支持“范围随机”写法：
+> - 字符串区间：`"100ms~500ms"`、`"1~10"`
+> - 对象区间：`{min: 100ms, max: 500ms}`、`{min: 1, max: 10}`
+> 每次生成 workflow 时会在区间内随机采样一次。
 
 ## 7. Renderers：支持的 case 类型与完整语法
 

@@ -1,29 +1,11 @@
 # -*- coding: utf-8 -*-
 import random
-import re
 from chaos_runner.workflow_factory.renderers import register
+from chaos_runner.workflow_factory.renderers.value_resolver import resolve_duration, resolve_percent
 
 
 def _format_delay(d):
-    """
-    Normalize delay into Chaos Mesh duration string.
-    - int/float -> seconds -> "1s"/"0.2s"
-    - "200ms"/"1s"/"2m"/"0.5s" -> keep
-    - "1" / "0.2" -> treat as seconds -> "1s"/"0.2s"
-    - None/"" -> "0s"
-    """
-    if d is None or d == "":
-        return "0s"
-    if isinstance(d, (int, float)):
-        return f"{d}s"
-    if isinstance(d, str):
-        s = d.strip()
-        if s == "":
-            return "0s"
-        if re.match(r"^\d+(\.\d+)?$", s):
-            return f"{s}s"
-        return s
-    return str(d)
+    return resolve_duration(d, field_name="kill.items.delay")
 
 
 def _is_zero_delay(delay_str: str) -> bool:
@@ -178,8 +160,8 @@ def render(case, resolved, config):
 
     if "delay" in actions:
         # latency and jitter from case or config defaults
-        lat = str(delay_cfg.get("latency", getattr(config, "NET_DELAY", "100ms")))
-        jit = str(delay_cfg.get("jitter", getattr(config, "NET_JITTER", "10ms")))
+        lat = resolve_duration(delay_cfg.get("latency"), field_name="network.delay.latency", default=getattr(config, "NET_DELAY", "100ms"))
+        jit = resolve_duration(delay_cfg.get("jitter"), field_name="network.delay.jitter", default=getattr(config, "NET_JITTER", "10ms"))
         net_children.append("net-delay")
         net_templates.append(f"""
   - name: net-delay
@@ -206,7 +188,7 @@ def render(case, resolved, config):
 
     if "loss" in actions:
         # loss and correlation from case or config defaults
-        loss = str(loss_cfg.get("loss", getattr(config, "NET_LOSS", "1")))
+        loss = resolve_percent(loss_cfg.get("loss"), field_name="network.loss.loss", default=getattr(config, "NET_LOSS", "1"))
         corr = str(loss_cfg.get("correlation", getattr(config, "NET_CORR", "0")))
         net_children.append("net-loss")
         net_templates.append(f"""
