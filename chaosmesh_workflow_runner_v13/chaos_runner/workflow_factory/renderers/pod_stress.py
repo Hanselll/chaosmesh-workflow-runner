@@ -43,6 +43,41 @@ def _select_targets(resolved, target_id, expand_cfg):
     raise RuntimeError("target {} is a list; set stress.expand to all/random/indices".format(target_id))
 
 
+def _resolve_stress_targets(stress_cfg):
+    """
+    Supported forms:
+    - legacy single target:
+      stress.target: <target-id>
+      stress.expand: ...
+
+    - multi-target:
+      stress.targets:
+        - target: <target-id>
+          expand: ...
+        - target: <target-id>
+    """
+    targets = stress_cfg.get("targets")
+    if targets:
+        if not isinstance(targets, list):
+            raise RuntimeError("stress.targets must be a list")
+        out = []
+        for it in targets:
+            if not isinstance(it, dict):
+                raise RuntimeError("each item in stress.targets must be an object")
+            tid = it.get("target")
+            if not tid:
+                raise RuntimeError("each stress.targets item must include target")
+            out.append({"target": tid, "expand": it.get("expand")})
+        return out
+
+    # backward compatibility
+    target_id = stress_cfg.get("target")
+    if target_id:
+        return [{"target": target_id, "expand": stress_cfg.get("expand")}]
+
+    raise RuntimeError("stress.target or stress.targets is required")
+
+
 def _render_cpu(workflow_name, workflow_ns, target_ns, pod_names, deadline, stress_cfg):
     workers = int(stress_cfg.get("workers", 1))
     load = int(stress_cfg.get("load", 80))
@@ -132,19 +167,30 @@ def _render(case, resolved, config, mode):
     ns = config.NS_TARGET
 
     stress = case.get("stress") or {}
-    target_id = stress.get("target")
-    if not target_id:
-        raise RuntimeError("stress.target is required")
+    target_defs = _resolve_stress_targets(stress)
 
     duration = resolve_duration(stress.get("duration", "30s"), field_name="stress.duration", default="30s")
-    selected = _select_targets(resolved, target_id, stress.get("expand"))
-    pod_names = [x.get("pod") for x in selected if isinstance(x, dict) and x.get("pod")]
-    if not pod_names:
-        raise RuntimeError("stress.target resolves to empty pod list")
+
+    pod_names = []
+    for item in target_defs:
+        selected = _select_targets(resolved, item["target"], item.get("expand"))
+        pod_names.extend([x.get("pod") for x in selected if isinstance(x, dict) and x.get("pod")])
+
+    # preserve order while deduplicating
+    seen = set()
+    uniq_pods = []
+    for p in pod_names:
+        if p in seen:
+            continue
+        seen.add(p)
+        uniq_pods.append(p)
+
+    if not uniq_pods:
+        raise RuntimeError("stress target(s) resolve to empty pod list")
 
     if mode == "cpu":
-        return _render_cpu(wf_name, wf_ns, ns, pod_names, duration, stress.get("cpu") or {})
-    return _render_memory(wf_name, wf_ns, ns, pod_names, duration, stress.get("memory") or {})
+        return _render_cpu(wf_name, wf_ns, ns, uniq_pods, duration, stress.get("cpu") or {})
+    return _render_memory(wf_name, wf_ns, ns, uniq_pods, duration, stress.get("memory") or {})
 
 
 @register("cpu_stress_single_role")

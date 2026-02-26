@@ -8,9 +8,16 @@ renderer: memory_stress_single_role
 targets:
   - id: sdbm
     finder: sdb_master
+  - id: sdbs
+    finder: sdb_slaves
 
 stress:
-  target: sdbm
+  targets:
+    - target: sdbm
+    - target: sdbs
+      expand:
+        mode: random
+        count: 1
   duration:
     min: 20s
     max: 60s

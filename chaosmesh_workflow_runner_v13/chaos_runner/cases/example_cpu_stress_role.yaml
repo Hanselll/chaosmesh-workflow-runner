@@ -6,11 +6,18 @@ workflow:
 renderer: cpu_stress_single_role
 
 targets:
-  - id: rc
+  - id: rc_leader
     finder: rc_leader
+  - id: rc_followers
+    finder: rc_followers
 
 stress:
-  target: rc
+  targets:
+    - target: rc_leader
+    - target: rc_followers
+      expand:
+        mode: random
+        count: 1
   duration: "20s~40s"
   cpu:
     workers: 2

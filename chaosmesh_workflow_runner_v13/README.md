@@ -547,7 +547,7 @@ cleanup: true
 
 ### 7.5 renderer = `cpu_stress_single_role`
 
-**用途**：对指定角色 Pod 注入 CPU 压力（StressChaos）。
+**用途**：对一个或多个指定角色 Pod 同时注入 CPU 压力（StressChaos）。
 
 ```yaml
 renderer: cpu_stress_single_role
@@ -557,10 +557,19 @@ targets:
     finder: rc_leader
 
 stress:
-  target: rc_leader
-  duration: 30s                 # 支持随机范围："10s~60s" / {min: 10s, max: 60s}
-  # 当 target 解析为 list 时可选
+  # 支持单目标（兼容旧写法）：
+  # target: rc_leader
   # expand: all | {mode: random, count: 1} | {indices: [0]}
+
+  # 支持多目标（推荐）：可同时对多个角色注入 stress
+  targets:
+    - target: rc_leader
+    - target: rc_followers
+      expand:
+        mode: random
+        count: 1
+
+  duration: 30s                 # 支持随机范围："10s~60s" / {min: 10s, max: 60s}
   cpu:
     workers: 2
     load: 80
@@ -568,7 +577,7 @@ stress:
 
 ### 7.6 renderer = `memory_stress_single_role`
 
-**用途**：对指定角色 Pod 注入内存压力（StressChaos）。
+**用途**：对一个或多个指定角色 Pod 同时注入内存压力（StressChaos）。
 
 ```yaml
 renderer: memory_stress_single_role
@@ -578,7 +587,12 @@ targets:
     finder: sdb_master
 
 stress:
-  target: sdb_master
+  targets:
+    - target: sdb_master
+    - target: sdb_slaves
+      expand:
+        mode: random
+        count: 1
   duration: 45s
   memory:
     workers: 1
