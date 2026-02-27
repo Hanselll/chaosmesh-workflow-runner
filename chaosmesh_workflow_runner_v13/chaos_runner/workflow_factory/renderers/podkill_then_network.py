@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from chaos_runner.workflow_factory.renderers import register
+from chaos_runner.workflow_factory.renderers.value_resolver import resolve_duration, resolve_percent
 
 @register("podkill_then_network")
 def render(case, resolved, config):
@@ -21,9 +22,9 @@ def render(case, resolved, config):
     direction = net.get("direction", "both")
     upc_label = net.get("upc_label_kv", "app.kubernetes.io/component: dupf-pod-upc")
     rc_label  = net.get("rc_label_kv",  "app.kubernetes.io/component: dupf-registry-center")
-    lat = net.get("latency", "100ms")
-    jit = net.get("jitter", "10ms")
-    loss = net.get("loss", "1")
+    lat = resolve_duration(net.get("latency"), field_name="network.latency", default="100ms")
+    jit = resolve_duration(net.get("jitter"), field_name="network.jitter", default="10ms")
+    loss = resolve_percent(net.get("loss"), field_name="network.loss", default="1")
     corr = net.get("corr", "0")
 
     return """apiVersion: chaos-mesh.org/v1alpha1

@@ -1,10 +1,24 @@
 # -*- coding: utf-8 -*-
+import importlib
+
 from chaos_runner.workflow_factory.targets import resolve_targets
 from chaos_runner.workflow_factory.renderers import get as get_renderer
 
-# import renderers to register
-from chaos_runner.workflow_factory.renderers import parallel_podkill  # noqa:F401
-from chaos_runner.workflow_factory.renderers import podkill_then_network  # noqa:F401
+
+# Best-effort preload built-in renderers; missing files won't break runner startup.
+for _m in (
+    "parallel_podkill",
+    "podkill_then_network",
+    "network_then_parallel_podkill",
+    "network_parallel_containerkill",
+    "pod_stress",
+    "modular_chaos",
+):
+    try:
+        importlib.import_module("chaos_runner.workflow_factory.renderers.{}".format(_m))
+    except ModuleNotFoundError:
+        pass
+
 
 def build(case, config):
     resolved = resolve_targets(case)

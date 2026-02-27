@@ -2,6 +2,7 @@
 import random
 import re
 from chaos_runner.workflow_factory.renderers import register
+from chaos_runner.workflow_factory.renderers.value_resolver import resolve_duration
 
 @register("parallel_podkill")
 def render(case, resolved, config):
@@ -17,26 +18,6 @@ def render(case, resolved, config):
 
     # plan: list of dicts {pod: name, delay: duration string}
     plan = []
-
-    def _format_delay(d):
-        """
-        Normalize a delay value into a Chaos Mesh duration string.
-
-        Accepts integers/floats (treated as seconds) or strings. Numeric values
-        are converted to seconds with an 's' suffix. Strings are returned as-is
-        if they already specify a unit (ns/us/ms/s/m/h). Purely numeric strings
-        have an 's' suffix appended.
-        """
-        if d is None or d == "":
-            return "0s"
-        if isinstance(d, (int, float)):
-            return f"{d}s"
-        s = str(d).strip()
-        if re.match(r"^\d+(\.\d+)?$", s):
-            return f"{s}s"
-        if re.match(r"^\d+(\.\d+)?(ns|us|ms|s|m|h)$", s, re.IGNORECASE):
-            return s
-        raise RuntimeError(f"invalid delay value: {d}")
 
     def _is_zero_delay(d):
         """
@@ -103,7 +84,7 @@ def render(case, resolved, config):
     for it in items:
         tid = it["target"]
         raw_delay = it.get("delay", 0)
-        delay = _format_delay(raw_delay)
+        delay = resolve_duration(raw_delay, field_name="kill.items.delay")
         expand_cfg = it.get("expand")
 
         val = resolved.get(tid)
@@ -183,4 +164,3 @@ spec:
         branches="\n        - ".join(branches),
         templates="".join(templates).rstrip("\n")
     )
-

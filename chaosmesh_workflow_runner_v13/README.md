@@ -145,11 +145,11 @@ network:
   # action: both             # 等价于 actions: [delay, loss]
 
   delay:
-    latency: 300ms
-    jitter: 10ms
+    latency: 300ms          # 支持随机范围："100ms~500ms" 或 {min: 100ms, max: 500ms}
+    jitter: 10ms            # 支持随机范围
 
   loss:
-    loss: "10"
+    loss: "10"             # 支持随机范围："1~20" 或 {min: 1, max: 20}
     correlation: "0"         # v13 内部字段名是 correlation（旧 case 里写 corr 也常见，但建议统一）
 
   selectors:
@@ -175,10 +175,17 @@ kill:
   items:
     - target: <target-id>
       delay: 0               # 支持 0 / "200ms" / "1s" / 1(秒) / 0.5(秒)
+      # 也支持随机范围："200ms~2s" 或 {min: 200ms, max: 2s}
       expand: ...            # target 是 list 时可用
 ```
 
 ---
+
+
+> 新增：`kill.items[].delay`、`network.delay.latency`、`network.delay.jitter`、`network.loss.loss` 均支持“范围随机”写法：
+> - 字符串区间：`"100ms~500ms"`、`"1~10"`
+> - 对象区间：`{min: 100ms, max: 500ms}`、`{min: 1, max: 10}`
+> 每次生成 workflow 时会在区间内随机采样一次。
 
 ## 7. Renderers：支持的 case 类型与完整语法
 
@@ -188,6 +195,9 @@ v13 内置 renderer：
 - `network_then_parallel_podkill`
 - `network_parallel_containerkill`
 - `podkill_then_network`（旧风格，字段不同）
+- `cpu_stress_parallel`
+- `memory_stress_parallel`
+- `modular_chaos`（可组合/可扩展）
 
 下面给出每类 renderer 的**完整语法**与**典型示例**。
 
@@ -531,4 +541,125 @@ cleanup: true
 - NetworkChaos 支持 `partition`
 - `network.labels` 可不填：自动 fallback 到 resolved pods（精确到 Pod 名）
 - 解决“master/slave label 相同导致误伤整组”的问题（例如只隔离 SDB master）
+
+
+---
+
+
+### 7.5 renderer = `cpu_stress_parallel`
+
+**用途**：对一个或多个指定角色 Pod 同时注入 CPU 压力（StressChaos），并支持为每个 target 单独设置 CPU 参数。
+
+```yaml
+renderer: cpu_stress_parallel
+
+targets:
+  - id: rc_leader
+    finder: rc_leader
+
+stress:
+  # 支持单目标（兼容旧写法）：
+  # target: rc_leader
+  # expand: all | {mode: random, count: 1} | {indices: [0]}
+
+  # 全局默认值（可被每个 target 覆盖）
+  duration: 30s                 # 支持随机范围："10s~60s" / {min: 10s, max: 60s}
+  cpu:
+    workers: 2
+    load: 80
+
+  # 支持多目标（推荐）：可同时对多个角色注入 stress
+  # 每个 target 可单独设置 cpu 参数
+  targets:
+    - target: rc_leader
+      cpu:
+        workers: 1
+        load: 60
+    - target: rc_followers
+      expand:
+        mode: random
+        count: 1
+      cpu:
+        workers: 2
+        load: 90
+```
+
+> 说明：`stress.targets[]` 中可选填写 `cpu`/`memory` 和 `duration` 来覆盖全局默认值。
+
+### 7.6 renderer = `memory_stress_parallel`
+
+**用途**：对一个或多个指定角色 Pod 同时注入内存压力（StressChaos），并支持为每个 target 单独设置内存参数。
+
+```yaml
+renderer: memory_stress_parallel
+
+targets:
+  - id: sdb_master
+    finder: sdb_master
+
+stress:
+  # 全局默认值（可被每个 target 覆盖）
+  duration: 45s
+  memory:
+    workers: 1
+    size: 256MB
+
+  targets:
+    - target: sdb_master
+      memory:
+        workers: 1
+        size: 192MB
+    - target: sdb_slaves
+      expand:
+        mode: random
+        count: 1
+      memory:
+        workers: 2
+        size: 384MB
+```
+
+
+
+### 7.7 renderer = `modular_chaos` ✅（模块化可扩展组合）
+
+**用途**：在一个 workflow 中任意组合多种故障，并支持后续继续新增故障类型。  
+当前内置故障类型：
+- `pod_kill`
+- `container_kill`
+- `network_delay`
+- `network_loss`
+- `network_partition`
+- `cpu_stress`
+- `memory_stress`
+
+#### 基本语法（推荐 stages）
+
+```yaml
+renderer: modular_chaos
+
+targets: [...]
+
+stages:
+  - mode: parallel   # parallel / serial
+    faults:
+      - type: pod_kill
+        target: rc_leader
+        delay: "0s~1s"
+      - type: network_loss
+        selectors: {from: upc, to: rc_leader}
+        duration: 30s
+        loss: {loss: "1~10", correlation: "0"}
+```
+
+也可使用简化写法：
+
+```yaml
+renderer: modular_chaos
+mode: parallel
+faults: [...]
+```
+
+#### 可扩展性说明
+
+`modular_chaos` 使用故障构建器注册表（`FAULT_BUILDERS`）实现，新增故障类型只需新增一个 `@fault_builder("new_type")` 函数，即可与已有故障组合使用。
 
