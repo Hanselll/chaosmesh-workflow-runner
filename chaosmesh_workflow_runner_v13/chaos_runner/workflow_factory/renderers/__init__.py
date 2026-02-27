@@ -33,5 +33,6 @@ for _m in (
     "network_then_parallel_podkill",
     "network_parallel_containerkill",
     "pod_stress",
+    "modular_chaos",
 ):
     _safe_import(_m)

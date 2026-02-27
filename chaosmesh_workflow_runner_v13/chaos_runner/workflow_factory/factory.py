@@ -12,6 +12,7 @@ for _m in (
     "network_then_parallel_podkill",
     "network_parallel_containerkill",
     "pod_stress",
+    "modular_chaos",
 ):
     try:
         importlib.import_module("chaos_runner.workflow_factory.renderers.{}".format(_m))

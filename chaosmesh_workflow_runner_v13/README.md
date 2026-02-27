@@ -197,6 +197,7 @@ v13 内置 renderer：
 - `podkill_then_network`（旧风格，字段不同）
 - `cpu_stress_parallel`
 - `memory_stress_parallel`
+- `modular_chaos`（可组合/可扩展）
 
 下面给出每类 renderer 的**完整语法**与**典型示例**。
 
@@ -616,4 +617,49 @@ stress:
         workers: 2
         size: 384MB
 ```
+
+
+
+### 7.7 renderer = `modular_chaos` ✅（模块化可扩展组合）
+
+**用途**：在一个 workflow 中任意组合多种故障，并支持后续继续新增故障类型。  
+当前内置故障类型：
+- `pod_kill`
+- `container_kill`
+- `network_delay`
+- `network_loss`
+- `network_partition`
+- `cpu_stress`
+- `memory_stress`
+
+#### 基本语法（推荐 stages）
+
+```yaml
+renderer: modular_chaos
+
+targets: [...]
+
+stages:
+  - mode: parallel   # parallel / serial
+    faults:
+      - type: pod_kill
+        target: rc_leader
+        delay: "0s~1s"
+      - type: network_loss
+        selectors: {from: upc, to: rc_leader}
+        duration: 30s
+        loss: {loss: "1~10", correlation: "0"}
+```
+
+也可使用简化写法：
+
+```yaml
+renderer: modular_chaos
+mode: parallel
+faults: [...]
+```
+
+#### 可扩展性说明
+
+`modular_chaos` 使用故障构建器注册表（`FAULT_BUILDERS`）实现，新增故障类型只需新增一个 `@fault_builder("new_type")` 函数，即可与已有故障组合使用。
 
