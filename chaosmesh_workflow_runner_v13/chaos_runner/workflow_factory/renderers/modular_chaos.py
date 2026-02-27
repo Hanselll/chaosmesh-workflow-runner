@@ -45,6 +45,10 @@ def _pick_targets(resolved, target_id, expand=None):
     raise RuntimeError("target {} is list, set expand (all/random/indices)".format(target_id))
 
 
+def _dns_name(name):
+    return str(name).replace("_", "-").lower()
+
+
 def _pods_block(ns, pods, ns_indent, item_indent):
     lines = [(" " * ns_indent) + "{}:".format(ns)]
     for p in pods:
@@ -262,8 +266,8 @@ def _build_stress(ctx, fault, idx, mode):
     ns = ctx["ns"]
     pods = [x.get("pod") for x in _pick_targets(ctx["resolved"], fault.get("target"), fault.get("expand")) if x.get("pod")]
     deadline = resolve_duration(fault.get("duration", "30s"), field_name="stress.duration", default="30s")
-    name = "f{}-{}".format(idx, mode)
-    if mode == "cpu_stress":
+    name = _dns_name("f{}-{}".format(idx, mode))
+    if mode == "cpu-stress":
         cfg = fault.get("cpu") or {}
         stressor = """          cpu:\n            workers: {workers}\n            load: {load}""".format(
             workers=int(cfg.get("workers", 1)), load=int(cfg.get("load", 80))
@@ -292,12 +296,12 @@ def _build_stress(ctx, fault, idx, mode):
 
 @fault_builder("cpu_stress")
 def build_cpu_stress(ctx, fault, idx):
-    return _build_stress(ctx, fault, idx, "cpu_stress")
+    return _build_stress(ctx, fault, idx, "cpu-stress")
 
 
 @fault_builder("memory_stress")
 def build_memory_stress(ctx, fault, idx):
-    return _build_stress(ctx, fault, idx, "memory_stress")
+    return _build_stress(ctx, fault, idx, "memory-stress")
 
 
 def _build_group(group_name, mode, children):
