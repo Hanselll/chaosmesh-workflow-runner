@@ -622,7 +622,7 @@ stress:
 
 ### 7.7 renderer = `modular_chaos` ✅（模块化可扩展组合）
 
-**用途**：在一个 workflow 中任意组合多种故障，并支持后续继续新增故障类型。  
+**用途**：在一个 workflow 中按 stage 组合多种故障（网络 / kill / stress），适合表达“同一背景故障下执行不同动作”的复杂实验。  
 当前内置故障类型：
 - `pod_kill`
 - `container_kill`
@@ -632,7 +632,9 @@ stress:
 - `cpu_stress`
 - `memory_stress`
 
-#### 基本语法（推荐 stages）
+---
+
+#### 7.7.1 基本语法（推荐 `stages`）
 
 ```yaml
 renderer: modular_chaos
@@ -651,7 +653,7 @@ stages:
         loss: {loss: "1~10", correlation: "0"}
 ```
 
-也可使用简化写法：
+也可使用简化写法（单 stage）：
 
 ```yaml
 renderer: modular_chaos
@@ -659,7 +661,258 @@ mode: parallel
 faults: [...]
 ```
 
+> `stages` 存在时，顶层会按 **Serial** 串行执行各 stage；每个 stage 内部由 `mode` 决定并行/串行。
+
+---
+
+#### 7.7.2 `network_*` 在 modular 中的方向语义（`direction`）
+
+`network_delay / network_loss / network_partition` 都支持：
+
+```yaml
+- type: network_delay
+  selectors:
+    from: upc_lb
+    to: rc_leader
+  direction: both   # both / from / to
+```
+
+方向含义与 Chaos Mesh 一致：
+
+- `both`：双向影响（`from -> to` 和 `to -> from` 都受影响）
+- `to`：仅影响 **from 发往 to** 的流量（可理解为“打 to 方向”）
+- `from`：仅影响 **to 发往 from** 的流量（可理解为“打 from 方向”）
+
+可用记忆方式：
+- `selectors.from=A, selectors.to=B`
+  - `direction: to` => 主要影响 **A -> B**
+  - `direction: from` => 主要影响 **B -> A**
+  - `direction: both` => **A <-> B**
+
+---
+
+#### 7.7.3 modular 各故障类型常用字段速查
+
+##### A) `pod_kill`
+
+```yaml
+- type: pod_kill
+  target: rc_leader
+  # target 为 list 时可配 expand
+  # expand: all / {mode: random, count: 1} / {indices: [0]}
+  delay: "0s~1s"
+  duration: 1s      # 可选；建议显式设置短时，避免 stage 挂起太久
+```
+
+##### B) `container_kill`
+
+```yaml
+- type: container_kill
+  target: upc_lb
+  expand: {mode: random, count: 1}
+  containerNames: [upc-lb]   # 必填
+  delay: "0s~1s"
+  duration: 1s
+```
+
+##### C) `network_delay`
+
+```yaml
+- type: network_delay
+  selectors: {from: upc_lb, to: rc_leader}
+  duration: 30s
+  direction: both
+  delay:
+    latency: "100ms~500ms"
+    jitter: "5ms~20ms"
+```
+
+##### D) `network_loss`
+
+```yaml
+- type: network_loss
+  selectors: {from: upc_lb, to: rc_leader}
+  duration: 30s
+  direction: both
+  loss:
+    loss: "1~10"
+    correlation: "0"
+```
+
+##### E) `network_partition`
+
+```yaml
+- type: network_partition
+  selectors: {from: sdb_sentinels, to: sdb_master}
+  duration: 20s
+  direction: both
+```
+
+---
+
+#### 7.7.4 示例 1：同一网络背景下，先 container kill 再 pod kill（两阶段）
+
+```yaml
+name: modular_net_loss_delay_kill_two_stage
+workflow:
+  name: wf-modular-net-loss-delay-kill-two-stage
+  namespace: default
+
+renderer: modular_chaos
+
+targets:
+  - id: rc_leader
+    finder: rc_leader
+  - id: upc_lb
+    finder: by_label
+    label: "app.kubernetes.io/dupf.service: dupf-pod-upc-lb"
+
+stages:
+  - mode: parallel
+    faults:
+      - type: network_delay
+        selectors: {from: upc_lb, to: rc_leader}
+        direction: both
+        duration: 30s
+        delay: {latency: 300ms, jitter: 10ms}
+      - type: network_loss
+        selectors: {from: upc_lb, to: rc_leader}
+        direction: both
+        duration: 30s
+        loss: {loss: "10", correlation: "0"}
+      - type: container_kill
+        target: rc_leader
+        containerNames: [registry-center]
+        delay: "0s~1s"
+        duration: 1s
+      - type: container_kill
+        target: upc_lb
+        expand: {mode: random, count: 1}
+        containerNames: [upc-lb]
+        delay: "0s~1s"
+        duration: 1s
+
+  - mode: parallel
+    faults:
+      - type: network_delay
+        selectors: {from: upc_lb, to: rc_leader}
+        direction: both
+        duration: 30s
+        delay: {latency: 300ms, jitter: 10ms}
+      - type: network_loss
+        selectors: {from: upc_lb, to: rc_leader}
+        direction: both
+        duration: 30s
+        loss: {loss: "10", correlation: "0"}
+      - type: pod_kill
+        target: rc_leader
+        delay: "0s~1s"
+        duration: 1s
+      - type: pod_kill
+        target: upc_lb
+        expand: {mode: random, count: 1}
+        delay: "0s~1s"
+        duration: 1s
+
+wait_seconds: 120
+cleanup: true
+```
+
+---
+
+#### 7.7.5 示例 2：单向退化（只影响 upc_lb -> rc_leader）+ 随机 kill 1 个 upc_lb
+
+```yaml
+name: modular_one_way_to_rc_with_random_kill
+workflow:
+  name: wf-modular-one-way-to-rc-with-random-kill
+  namespace: default
+
+renderer: modular_chaos
+
+targets:
+  - id: rc_leader
+    finder: rc_leader
+  - id: upc_lb
+    finder: by_label
+    label: "app.kubernetes.io/dupf.service: dupf-pod-upc-lb"
+
+stages:
+  - mode: parallel
+    faults:
+      - type: network_delay
+        selectors: {from: upc_lb, to: rc_leader}
+        direction: to
+        duration: 20s
+        delay: {latency: 500ms, jitter: 20ms}
+      - type: network_loss
+        selectors: {from: upc_lb, to: rc_leader}
+        direction: to
+        duration: 20s
+        loss: {loss: "5~15", correlation: "0"}
+      - type: pod_kill
+        target: upc_lb
+        expand: {mode: random, count: 1}
+        delay: "0s~1s"
+        duration: 1s
+
+wait_seconds: 40
+cleanup: true
+```
+
+---
+
+#### 7.7.6 示例 3：`serial` stage 内逐步注入（先 delay 再 loss）
+
+```yaml
+name: modular_serial_net_steps
+workflow:
+  name: wf-modular-serial-net-steps
+  namespace: default
+
+renderer: modular_chaos
+
+targets:
+  - id: upc_non_talkers
+    finder: upc_non_talkers
+  - id: rc_leader
+    finder: rc_leader
+
+stages:
+  - mode: serial
+    faults:
+      - type: network_delay
+        selectors: {from: upc_non_talkers, to: rc_leader}
+        direction: both
+        duration: 15s
+        delay: {latency: 150ms, jitter: 10ms}
+      - type: network_loss
+        selectors: {from: upc_non_talkers, to: rc_leader}
+        direction: both
+        duration: 15s
+        loss: {loss: "3", correlation: "0"}
+
+  - mode: parallel
+    faults:
+      - type: container_kill
+        target: rc_leader
+        containerNames: [registry-center]
+        delay: "500ms"
+        duration: 1s
+
+wait_seconds: 45
+cleanup: true
+```
+
+---
+
+#### 7.7.7 排障建议（modular 常见“看起来没执行”问题）
+
+1. **确认 stage 是否串行推进**：顶层 `templates[entry].templateType` 应为 `Serial`（当使用 `stages` 时）。
+2. **检查 kill fault 是否有边界时长**：建议为 `pod_kill/container_kill` 显式写 `duration: 1s`。
+3. **检查 `wait_seconds` 是否覆盖总时长**：建议 ≥ 所有 stage 关键故障持续时间之和 + 余量。
+4. **确认 target 解析是否稳定**：`expand.mode=random` 每次可能选不同 pod，排障时可加 `seed` 固定选择。
+
 #### 可扩展性说明
 
 `modular_chaos` 使用故障构建器注册表（`FAULT_BUILDERS`）实现，新增故障类型只需新增一个 `@fault_builder("new_type")` 函数，即可与已有故障组合使用。
-
