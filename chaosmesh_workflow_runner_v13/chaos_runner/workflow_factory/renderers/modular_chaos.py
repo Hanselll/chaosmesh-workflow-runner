@@ -84,6 +84,9 @@ def build_pod_kill(ctx, fault, idx):
     ns = ctx["ns"]
     target = fault.get("target")
     pods = [x.get("pod") for x in _pick_targets(ctx["resolved"], target, fault.get("expand")) if x.get("pod")]
+    # PodChaos without deadline can keep running and block later serial stages.
+    # Keep a short default so this remains a trigger-style kill action.
+    deadline = resolve_duration(fault.get("duration", fault.get("deadline", "1s")), field_name="fault.duration", default="1s")
     children = []
     templates = []
     for i, pod in enumerate(pods):
@@ -91,6 +94,7 @@ def build_pod_kill(ctx, fault, idx):
         action = """
     - name: {name}
       templateType: PodChaos
+      deadline: {deadline}
       podChaos:
         action: pod-kill
         mode: all
@@ -99,7 +103,7 @@ def build_pod_kill(ctx, fault, idx):
             - {ns}
           pods:
 {pods}
-""".format(name=name, ns=ns, pods=_pods_block(ns, [pod], 12, 14))
+""".format(name=name, deadline=deadline, ns=ns, pods=_pods_block(ns, [pod], 12, 14))
         root, tpls = _with_optional_delay(ctx, name, action, fault.get("delay"))
         children.append(root)
         templates.extend(tpls)
@@ -114,12 +118,16 @@ def build_container_kill(ctx, fault, idx):
     if not cnames:
         raise RuntimeError("container_kill.containerNames required")
     pods = [x.get("pod") for x in _pick_targets(ctx["resolved"], target, fault.get("expand")) if x.get("pod")]
+    # PodChaos without deadline can keep running and block later serial stages.
+    # Keep a short default so this remains a trigger-style kill action.
+    deadline = resolve_duration(fault.get("duration", fault.get("deadline", "1s")), field_name="fault.duration", default="1s")
     children, templates = [], []
     for i, pod in enumerate(pods):
         name = "f{}-ctrkill-{}".format(idx, i)
         action = """
     - name: {name}
       templateType: PodChaos
+      deadline: {deadline}
       podChaos:
         action: container-kill
         mode: one
@@ -132,6 +140,7 @@ def build_container_kill(ctx, fault, idx):
 {cnames}
 """.format(
             name=name,
+            deadline=deadline,
             ns=ns,
             pods=_pods_block(ns, [pod], 12, 14),
             cnames="\n".join(["          - {}".format(c) for c in cnames]),
