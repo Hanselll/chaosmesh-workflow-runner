@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from chaos_runner.tools.k8s import get_service_cluster_ip, get_pod_ip
+import time
 from chaos_runner.tools.http import http_get_json
 from chaos_runner import config
 
@@ -8,11 +9,29 @@ def fetch_rc_cluster():
     """
     GET /api/paas/v1/maintenance/rc/cluster
     返回包含 rc_cluster_info + etcd_cluster_info
+
+    Retries are applied for transient HTTP timeout/network errors to reduce
+    flakiness when RC API is briefly slow.
     """
     cip = get_service_cluster_ip(config.NS_TARGET, config.RC_SVC_NAME)
     url = "http://{}:{}{}".format(cip, config.RC_API_PORT, config.RC_CLUSTER_API_PATH)
-    data = http_get_json(url, timeout=5)
-    return data, url
+
+    timeout = int(getattr(config, "RC_HTTP_TIMEOUT", 5) or 5)
+    retries = int(getattr(config, "RC_HTTP_RETRIES", 0) or 0)
+    backoff = float(getattr(config, "RC_HTTP_RETRY_BACKOFF_SECONDS", 0.5) or 0.5)
+
+    last_error = None
+    for attempt in range(retries + 1):
+        try:
+            data = http_get_json(url, timeout=timeout)
+            return data, url
+        except RuntimeError as e:
+            last_error = e
+            if attempt >= retries:
+                break
+            time.sleep(backoff * (attempt + 1))
+
+    raise RuntimeError("fetch_rc_cluster failed after {} attempt(s): {}".format(retries + 1, last_error))
 
 
 def find_rc_leader(cluster_state):
