@@ -65,3 +65,8 @@ SDB_SENTINEL_PORT = 26380
 #UPC_LABEL_KV = "app.kubernetes.io/component: dupf-pod-upc"
 #RC_LABEL_KV = "app.kubernetes.io/component: dupf-registry-center"
 
+
+# HTTP timeout(seconds) and retries for querying RC cluster API
+RC_HTTP_TIMEOUT = 5
+RC_HTTP_RETRIES = 2
+RC_HTTP_RETRY_BACKOFF_SECONDS = 0.5

@@ -17,7 +17,8 @@ def fault_builder(name):
 def _pick_targets(resolved, target_id, expand=None):
     val = resolved.get(target_id)
     if val is None:
-        raise RuntimeError("unknown target id: {}".format(target_id))
+        known = ", ".join(sorted([str(k) for k in resolved.keys()]))
+        raise RuntimeError("unknown target id: {} (known targets: {})".format(target_id, known or "<none>"))
     if isinstance(val, dict):
         return [val]
     if not isinstance(val, list):
