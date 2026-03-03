@@ -11,6 +11,14 @@ from chaos_runner.discover.sdb import (
     find_sdb_sentinel_info,
 )
 
+
+_DEFAULT_TARGET_ALIASES_BY_FINDER = {
+    # Backward-compat: many cases reference target id "etcd" in selectors.
+    # If a case defines rc_etcd_leader using another id, also expose "etcd".
+    "rc_etcd_leader": "etcd",
+}
+
+
 def _call_optional_rc_finder(func_name, cluster_state):
     finder = getattr(rc_discover, func_name, None)
     if finder is None:
@@ -93,4 +101,9 @@ def resolve_targets(case):
             resolved[tid] = find_pods_by_label(label_kv)
         else:
             raise RuntimeError("Unknown finder: {}".format(finder))
+
+        alias = _DEFAULT_TARGET_ALIASES_BY_FINDER.get(finder)
+        if alias and alias not in resolved:
+            resolved[alias] = resolved[tid]
+
     return resolved
