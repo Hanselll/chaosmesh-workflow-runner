@@ -284,10 +284,16 @@ def _parse_rfc3339(ts):
     t = (ts or "").strip()
     if not t:
         return None
+    # Keep compatibility with Python 3.6 where datetime.fromisoformat is unavailable.
     if t.endswith("Z"):
-        t = t[:-1] + "+00:00"
+        t = t[:-1]
     try:
-        return datetime.fromisoformat(t)
+        return datetime.strptime(t, "%Y-%m-%dT%H:%M:%S%z")
+    except Exception:
+        pass
+    try:
+        # e.g. 2026-03-04T17:43:20
+        return datetime.strptime(t, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
     except Exception:
         return None
 

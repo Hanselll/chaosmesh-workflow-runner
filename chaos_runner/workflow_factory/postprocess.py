@@ -75,4 +75,10 @@ def expand_network_chaos_to_component_pods(wf_yaml_text, namespace):
 
     if not changed:
         return wf_yaml_text
-    return yaml.safe_dump(doc, allow_unicode=True, sort_keys=False)
+    try:
+        # PyYAML >= 5.1 supports sort_keys
+        return yaml.safe_dump(doc, allow_unicode=True, sort_keys=False)
+    except TypeError:
+        # PyYAML on older Python environments (e.g. py3.6 distro package)
+        # does not accept sort_keys.
+        return yaml.safe_dump(doc, allow_unicode=True)
