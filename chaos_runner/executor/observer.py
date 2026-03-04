@@ -195,15 +195,15 @@ def _render_lmt_compact(command, parsed):
 def _collect_lmt(namespace):
     oam_pod = _find_oam_pod(namespace)
     commands = [
-        "lmt-cli list upfGetTalkerRole --format json",
-        "lmt-cli list upfGetNodeAssociateInfo --format json",
-        "lmt-cli list upfGetLicenseUsage --format json",
-        "lmt-cli list upfGetSessionNum --format json",
-        "lmt-cli list upfGetUpcSessionNum --format json",
-        "lmt-cli list upfGetUpuInstanceStatus --format json",
-        "lmt-cli list upfGetWholeMachineRate --format json",
-        "lmt-cli list upfGetUpuForwardRate --format json",
-        "lmt-cli list upfGetRoleInterfaceRate --format json",
+        "lmt-cli list upfGetTalkerRole",
+        "lmt-cli list upfGetNodeAssociateInfo",
+        "lmt-cli list upfGetLicenseUsage",
+        "lmt-cli list upfGetSessionNum",
+        "lmt-cli list upfGetUpcSessionNum",
+        "lmt-cli list upfGetUpuInstanceStatus",
+        "lmt-cli list upfGetWholeMachineRate",
+        "lmt-cli list upfGetUpuForwardRate",
+        "lmt-cli list upfGetRoleInterfaceRate",
     ]
     ret = run_lmt_commands_in_container(
         namespace,

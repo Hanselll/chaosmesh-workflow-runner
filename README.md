@@ -38,16 +38,16 @@ python3 -m chaos_runner.runner --case chaos_runner/cases/xxx.yaml
    - RC：leader / followers
    - ETCD：leader / followers
 3. 业务侧 LMT 信息（在 OAM 容器内执行）
-   - 使用 JSON 输出采集（`--format json`），并整理成便于 PRE/POST 对比的格式
-   - `lmt-cli list upfGetTalkerRole --format json`
-   - `lmt-cli list upfGetNodeAssociateInfo --format json`
-   - `lmt-cli list upfGetLicenseUsage --format json`
-   - `lmt-cli list upfGetSessionNum --format json`
-   - `lmt-cli list upfGetUpcSessionNum --format json`
-   - `lmt-cli list upfGetUpuInstanceStatus --format json`
-   - `lmt-cli list upfGetWholeMachineRate --format json`
-   - `lmt-cli list upfGetUpuForwardRate --format json`
-   - `lmt-cli list upfGetRoleInterfaceRate --format json`
+   - 直接使用默认 JSON 输出采集（不加格式后缀），并整理成便于 PRE/POST 对比的格式
+   - `lmt-cli list upfGetTalkerRole`
+   - `lmt-cli list upfGetNodeAssociateInfo`
+   - `lmt-cli list upfGetLicenseUsage`
+   - `lmt-cli list upfGetSessionNum`
+   - `lmt-cli list upfGetUpcSessionNum`
+   - `lmt-cli list upfGetUpuInstanceStatus`
+   - `lmt-cli list upfGetWholeMachineRate`
+   - `lmt-cli list upfGetUpuForwardRate`
+   - `lmt-cli list upfGetRoleInterfaceRate`
 4. 与 PodChaos 目标 Pod 相关的 k8s 事件
    - 仅在 POST 记录本次执行期间产生的事件（不再记录 PRE 基线）
 
