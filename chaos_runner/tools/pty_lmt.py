@@ -123,19 +123,15 @@ def run_lmt_commands_in_container(
     for idx, command in enumerate(commands):
         begin = "__CMD_BEGIN_{}__".format(idx)
         end = "__CMD_END_{}__".format(idx)
-        send("echo {}\n".format(begin))
-        out += read_until(master_fd, begin, timeout=5)
-        send("{}\n".format(command))
-        out += read_until(master_fd, r"(root@|#)", timeout=15)
-        send("echo {}\n".format(end))
-        out += read_until(master_fd, end, timeout=5)
+        send("echo {b}\n{cmd}\necho {e}\n".format(b=begin, cmd=command, e=end))
+        chunk = read_until(master_fd, end, timeout=20)
+        out += chunk
 
-        frag = out
-        bi = frag.rfind(begin)
-        ei = frag.rfind(end)
+        bi = chunk.find(begin)
+        ei = chunk.find(end)
         seg = ""
         if bi >= 0 and ei > bi:
-            seg = frag[bi + len(begin):ei]
+            seg = chunk[bi + len(begin):ei]
         results.append({"command": command, "output": seg.strip()})
 
     send("exit\n")

@@ -57,6 +57,19 @@ def _get_pod_status_map(namespace, pod_names):
     return out
 
 
+def _get_all_pod_status_map(namespace):
+    data = json.loads(sh("kubectl -n {} get pod -o json".format(namespace)))
+    out = {}
+    for it in data.get("items", []):
+        name = ((it.get("metadata") or {}).get("name") or "").strip()
+        if not name:
+            continue
+        status = ((it.get("status") or {}).get("phase") or "")
+        node = ((it.get("spec") or {}).get("nodeName") or "")
+        out[name] = {"status": status, "node": node}
+    return out
+
+
 def _component_of_pod(name):
     low = (name or "").lower()
     if "ddb" in low:
@@ -305,11 +318,13 @@ def _clean_lmt_table_output(text, command):
         if not s.strip():
             continue
         # remove echoed command / shell prompt / marker lines
-        if command and command in s:
+        if command and s.strip() == command.strip():
             continue
         if "__CMD_BEGIN_" in s or "__CMD_END_" in s:
             continue
         if s.lstrip().startswith("root@") or s.lstrip().startswith("bash-"):
+            continue
+        if s.strip().lower() == "echo":
             continue
         out.append(s)
     return "\n".join(out).strip()
@@ -443,12 +458,22 @@ def collect_post_case_state(namespace, pre_state, case_log):
     case_log.log("  {}".format("-" * 130))
     pre_map = pre_state.get("pre_pod_status") or {}
     all_pods = sorted(set(pre_map.keys()) | set(pod_status.keys()))
+    post_all_map = _get_all_pod_status_map(namespace)
+    used_new = set()
     for pod in all_pods:
         pr = pre_map.get(pod) or {}
         po = pod_status.get(pod) or {}
+        note = ""
+        if not po:
+            repl = _find_replacement_pod(pod, post_all_map, used_new)
+            if repl:
+                new_name, new_row = repl
+                po = {"status": new_row.get("status"), "node": new_row.get("node")}
+                note = "  -> replaced_by={}".format(new_name)
+                used_new.add(new_name)
         pre_txt = _fmt_phase_node(pr)
         post_txt = _fmt_phase_node(po)
-        case_log.log("  {:<48} {:<35} {:<35}".format(pod, pre_txt, post_txt))
+        case_log.log("  {:<48} {:<35} {:<35}{}".format(pod, pre_txt, post_txt, note))
 
     _log_role_state(case_log, "[POST] Component Overall Role State", role_state)
     _log_lmt_pre_post_compare(case_log, pre_state.get("pre_lmt_state") or {}, lmt_state)
@@ -466,3 +491,30 @@ def _fmt_phase_node(row):
     phase = (row.get("status") or "<unknown-phase>").strip()
     node = (row.get("node") or "<unknown-node>").strip()
     return "{}@{}".format(phase, node)
+
+
+def _stable_pod_key(name):
+    p = (name or "").strip().split("-")
+    # Deployment/ReplicaSet pods usually end with '-<hash>-<suffix>'
+    if len(p) >= 3:
+        tail1 = p[-1]
+        tail2 = p[-2]
+        if tail1.isalnum() and tail2.isalnum() and len(tail1) >= 4 and len(tail2) >= 6:
+            return "-".join(p[:-2])
+    return (name or "").strip()
+
+
+def _find_replacement_pod(pre_pod, post_all_map, used_new_pods):
+    key = _stable_pod_key(pre_pod)
+    cands = []
+    for name, row in post_all_map.items():
+        if name in used_new_pods:
+            continue
+        if _stable_pod_key(name) != key:
+            continue
+        cands.append((name, row))
+    if not cands:
+        return None
+    # Prefer running pod
+    cands.sort(key=lambda x: (0 if (x[1].get("status") == "Running") else 1, x[0]))
+    return cands[0]

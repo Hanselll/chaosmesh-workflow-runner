@@ -33,6 +33,7 @@ python3 -m chaos_runner.runner --case chaos_runner/cases/xxx.yaml
    - Pod 名称
    - Pod 运行状态（phase）
    - 所在节点（nodeName）
+   - 若 Pod 在执行期间重建导致名字变化，会在 PRE/POST 对比中标注 `replaced_by=<new-pod-name>` 并显示新 Pod 节点
 2. 组件角色状态
    - DDB：masters / non-masters
    - RC：leader / followers
