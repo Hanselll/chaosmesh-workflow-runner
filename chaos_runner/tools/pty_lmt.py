@@ -126,15 +126,17 @@ def run_lmt_commands_in_container(
     for idx, command in enumerate(commands):
         begin = "__CMD_BEGIN_{}__".format(idx)
         end = "__CMD_END_{}__".format(idx)
-        send("echo {b}\n{cmd}\necho {e}\n".format(b=begin, cmd=command, e=end))
-        chunk = read_until(master_fd, end, timeout=20)
+        send("printf '{b}\\n'\n{cmd}\nprintf '{e}\\n'\n".format(b=begin, cmd=command, e=end))
+        # LMT table output may take longer in busy env; use larger timeout.
+        chunk = read_until(master_fd, re.escape(end), timeout=90)
         out += chunk
 
-        ei = chunk.rfind(end)
-        bi = chunk.rfind(begin, 0, ei if ei >= 0 else None)
+        # Extract from accumulated output to tolerate fragmented reads.
+        ei = out.rfind(end)
+        bi = out.rfind(begin, 0, ei if ei >= 0 else None)
         seg = ""
         if bi >= 0 and ei > bi:
-            seg = chunk[bi + len(begin):ei]
+            seg = out[bi + len(begin):ei]
         results.append({"command": command, "output": seg.strip()})
 
     send("exit\n")

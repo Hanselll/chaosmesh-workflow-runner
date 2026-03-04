@@ -288,7 +288,10 @@ def _collect_lmt(namespace):
     rows = []
     for item in ret.get("results") or []:
         raw = item.get("output", "")
-        rows.append({"command": item.get("command"), "table_text": _clean_lmt_table_output(raw, item.get("command", ""))})
+        cleaned = _clean_lmt_table_output(raw, item.get("command", ""))
+        if not cleaned:
+            cleaned = _fallback_lmt_text(raw)
+        rows.append({"command": item.get("command"), "table_text": cleaned})
 
     return {"oam_pod": oam_pod, "rows": rows, "raw_output": ret.get("raw_output", "")}
 
@@ -327,6 +330,19 @@ def _clean_lmt_table_output(text, command):
         if s.strip().lower() == "echo":
             continue
         out.append(s)
+    return "\n".join(out).strip()
+
+
+def _fallback_lmt_text(text):
+    """Best-effort fallback to avoid empty LMT blocks in logs."""
+    out = []
+    for ln in (text or "").splitlines():
+        s = (ln or "").strip()
+        if not s:
+            continue
+        if "__CMD_BEGIN_" in s or "__CMD_END_" in s:
+            continue
+        out.append((ln or "").rstrip())
     return "\n".join(out).strip()
 
 
@@ -429,9 +445,9 @@ def _log_lmt_pre_post_compare(case_log, pre_lmt_state, post_lmt_state):
         pre_table = (pre_rows.get(cmd) or {}).get("table_text", "")
         post_table = (post_rows.get(cmd) or {}).get("table_text", "")
         case_log.log("  [{}] PRE".format(title))
-        case_log.log("{}".format(pre_table if pre_table else "    <empty>"))
+        case_log.log("{}".format(pre_table if pre_table else "    <empty; raw=/tmp/lmt_raw_pty_multi.txt>"))
         case_log.log("  [{}] POST".format(title))
-        case_log.log("{}".format(post_table if post_table else "    <empty>"))
+        case_log.log("{}".format(post_table if post_table else "    <empty; raw=/tmp/lmt_raw_pty_multi.txt>"))
 
 
 def collect_pre_case_state(namespace, podchaos_target_pods, case_log):
