@@ -11,6 +11,56 @@
 python3 -m chaos_runner.runner --case chaos_runner/cases/xxx.yaml
 ```
 
+### 1.1 观测日志（新增）
+
+从当前版本开始，runner 会在 **执行 case 前后自动采集并记录观测信息**，日志文件路径会在启动时打印：
+
+```text
+[INFO] case-log: /tmp/chaos_case_<workflow-name>_<timestamp>.log
+```
+
+日志行带毫秒时间戳，格式示例：
+
+```text
+[2026-03-05 10:31:22.123] [PRE] pod status/node={...}
+```
+
+### 1.2 日志中包含哪些信息
+
+每次执行会记录以下内容（PRE/POST 各一份）：
+
+1. targets 相关 Pod 信息
+   - Pod 名称
+   - Pod 运行状态（phase）
+   - 所在节点（nodeName）
+2. 组件角色状态
+   - DDB：masters / non-masters
+   - RC：leader / followers
+   - ETCD：leader / followers
+3. 业务侧 LMT 信息（在 OAM 容器内执行）
+   - `lmt-cli list upfGetTalkerRole --format table`
+   - `lmt-cli list upfGetNodeAssociateInfo --format table`
+   - `lmt-cli list upfGetLicenseUsage --format table`
+   - `lmt-cli list upfGetSessionNum --format table`
+   - `lmt-cli list upfGetUpcSessionNum --format table`
+   - `lmt-cli list upfGetUpuInstanceStatus --format table`
+   - `lmt-cli list upfGetWholeMachineRate --format table`
+   - `lmt-cli list upfGetUpuForwardRate --format table`
+   - `lmt-cli list upfGetRoleInterfaceRate --format table`
+4. 与 targets Pod 相关的 k8s 事件
+   - PRE 阶段记录事件快照基线
+   - POST 阶段记录运行期间新增/计数增加的事件
+
+### 1.3 推荐查看方式
+
+```bash
+# 实时查看本次 case 日志
+tail -f /tmp/chaos_case_<workflow-name>_<timestamp>.log
+
+# 快速定位事件记录
+grep "\[POST\]\[EVENT\]" /tmp/chaos_case_<workflow-name>_<timestamp>.log
+```
+
 常用字段：
 
 - `wait_seconds`: runner 等待 workflow 运行的时间（秒）
