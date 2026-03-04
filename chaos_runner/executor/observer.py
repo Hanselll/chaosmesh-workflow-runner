@@ -251,15 +251,15 @@ def _render_lmt_compact(command, parsed):
 def _collect_lmt(namespace):
     oam_pod = _find_oam_pod(namespace)
     commands = [
-        "lmt-cli list upfGetTalkerRole",
-        "lmt-cli list upfGetNodeAssociateInfo",
-        "lmt-cli list upfGetLicenseUsage",
-        "lmt-cli list upfGetSessionNum",
-        "lmt-cli list upfGetUpcSessionNum",
-        "lmt-cli list upfGetUpuInstanceStatus",
-        "lmt-cli list upfGetWholeMachineRate",
-        "lmt-cli list upfGetUpuForwardRate",
-        "lmt-cli list upfGetRoleInterfaceRate",
+        "lmt-cli list upfGetTalkerRole --format table",
+        "lmt-cli list upfGetNodeAssociateInfo --format table",
+        "lmt-cli list upfGetLicenseUsage --format table",
+        "lmt-cli list upfGetSessionNum --format table",
+        "lmt-cli list upfGetUpcSessionNum --format table",
+        "lmt-cli list upfGetUpuInstanceStatus --format table",
+        "lmt-cli list upfGetWholeMachineRate --format table",
+        "lmt-cli list upfGetUpuForwardRate --format table",
+        "lmt-cli list upfGetRoleInterfaceRate --format table",
     ]
     ret = run_lmt_commands_in_container(
         namespace,
@@ -274,8 +274,8 @@ def _collect_lmt(namespace):
 
     rows = []
     for item in ret.get("results") or []:
-        parsed = _parse_lmt_output(item.get("output"))
-        rows.append({"command": item.get("command"), "parsed": parsed, "raw": item.get("output", "")})
+        raw = item.get("output", "")
+        rows.append({"command": item.get("command"), "table_text": _clean_lmt_table_output(raw, item.get("command", ""))})
 
     return {"oam_pod": oam_pod, "rows": rows, "raw_output": ret.get("raw_output", "")}
 
@@ -296,6 +296,31 @@ def _parse_rfc3339(ts):
         return datetime.strptime(t, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
     except Exception:
         return None
+
+
+def _clean_lmt_table_output(text, command):
+    out = []
+    for ln in (text or "").splitlines():
+        s = (ln or "").rstrip()
+        if not s.strip():
+            continue
+        # remove echoed command / shell prompt / marker lines
+        if command and command in s:
+            continue
+        if "__CMD_BEGIN_" in s or "__CMD_END_" in s:
+            continue
+        if s.lstrip().startswith("root@") or s.lstrip().startswith("bash-"):
+            continue
+        out.append(s)
+    return "\n".join(out).strip()
+
+
+def _table_name(command):
+    c = (command or "").strip()
+    if c.startswith("lmt-cli list"):
+        c = c[len("lmt-cli list") :].strip()
+    c = c.replace("--format table", "").strip()
+    return c
 
 
 def _collect_target_events_rows(namespace, pod_names, since_time=None):
@@ -360,11 +385,23 @@ def _log_role_state(case_log, title, role_state):
         case_log.log("  ETCD followers: {}".format(", ".join(["{}({})".format(x.get("pod"), x.get("ip")) for x in etcd.get("followers", [])]) or "<none>"))
 
 
-def _log_lmt(case_log, title, lmt_state):
-    case_log.log("{} (oam={})".format(title, lmt_state.get("oam_pod", "")))
-    for row in lmt_state.get("rows", []):
-        for line in _render_lmt_compact(row.get("command", ""), row.get("parsed")):
-            case_log.log("  {}".format(line))
+def _log_lmt_pre_post_compare(case_log, pre_lmt_state, post_lmt_state):
+    case_log.log("[COMPARE] LMT PRE -> POST (oam={})".format(post_lmt_state.get("oam_pod", "")))
+    pre_rows = {r.get("command"): r for r in (pre_lmt_state.get("rows") or [])}
+    post_rows = {r.get("command"): r for r in (post_lmt_state.get("rows") or [])}
+    commands = [r.get("command") for r in (pre_lmt_state.get("rows") or [])]
+    for c in post_rows.keys():
+        if c not in commands:
+            commands.append(c)
+
+    for cmd in commands:
+        title = _table_name(cmd)
+        pre_table = (pre_rows.get(cmd) or {}).get("table_text", "")
+        post_table = (post_rows.get(cmd) or {}).get("table_text", "")
+        case_log.log("  [{}] PRE".format(title))
+        case_log.log("{}".format(pre_table if pre_table else "    <empty>"))
+        case_log.log("  [{}] POST".format(title))
+        case_log.log("{}".format(post_table if post_table else "    <empty>"))
 
 
 def collect_pre_case_state(namespace, podchaos_target_pods, case_log):
@@ -380,13 +417,14 @@ def collect_pre_case_state(namespace, podchaos_target_pods, case_log):
     case_log.log("[PRE] podchaos selected pods count={} components={}".format(len(podchaos_target_pods), involved_components))
     _log_pod_table(case_log, "[PRE] Pod Status", pod_status)
     _log_role_state(case_log, "[PRE] Component Overall Role State", role_state)
-    _log_lmt(case_log, "[PRE] LMT Business Snapshot", lmt_state)
+    case_log.log("[PRE] LMT Business Snapshot captured (oam={})".format(lmt_state.get("oam_pod", "")))
 
     return {
         "target_pods": podchaos_target_pods,
         "pre_pod_status": pod_status,
         "involved_components": involved_components,
         "run_start": run_start,
+        "pre_lmt_state": lmt_state,
     }
 
 
@@ -408,15 +446,23 @@ def collect_post_case_state(namespace, pre_state, case_log):
     for pod in all_pods:
         pr = pre_map.get(pod) or {}
         po = pod_status.get(pod) or {}
-        pre_txt = "{}@{}".format(pr.get("status", ""), pr.get("node", ""))
-        post_txt = "{}@{}".format(po.get("status", ""), po.get("node", ""))
+        pre_txt = _fmt_phase_node(pr)
+        post_txt = _fmt_phase_node(po)
         case_log.log("  {:<48} {:<35} {:<35}".format(pod, pre_txt, post_txt))
 
     _log_role_state(case_log, "[POST] Component Overall Role State", role_state)
-    _log_lmt(case_log, "[POST] LMT Business Snapshot", lmt_state)
+    _log_lmt_pre_post_compare(case_log, pre_state.get("pre_lmt_state") or {}, lmt_state)
 
     runtime_events = _collect_target_events_rows(namespace, target_pods, since_time=pre_state.get("run_start"))
     case_log.log("[POST] Runtime Target Events")
     case_log.log("  LASTSEEN TYPE REASON OBJECT_KIND OBJECT_NAME MESSAGE")
     for r in runtime_events:
         case_log.log("  {LASTSEEN} {TYPE} {REASON} {OBJECT_KIND} {OBJECT_NAME} {MESSAGE}".format(**r))
+
+
+def _fmt_phase_node(row):
+    if not row:
+        return "<missing>"
+    phase = (row.get("status") or "<unknown-phase>").strip()
+    node = (row.get("node") or "<unknown-node>").strip()
+    return "{}@{}".format(phase, node)
