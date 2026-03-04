@@ -21,6 +21,26 @@ def _component_of_pod(name):
     return "other"
 
 
+def _network_group_of_pod(name):
+    """Return finer-grained group for NetworkChaos expansion."""
+    low = (name or "").lower()
+    if "upc-lb" in low:
+        return "upc-lb"
+    if "upu" in low:
+        return "upu"
+    if "etcd" in low:
+        return "etcd"
+    if "registry" in low or "-rc-" in low or "dupf-rc" in low:
+        return "rc"
+    if "ddb" in low:
+        return "ddb"
+    if "sdb" in low:
+        return "sdb"
+    if "upc" in low:
+        return "upc"
+    return _component_of_pod(name)
+
+
 def _list_namespace_pods(namespace):
     data = json.loads(sh("kubectl -n {} get pod -o json".format(namespace)))
     names = []
@@ -44,9 +64,12 @@ def expand_network_chaos_to_component_pods(wf_yaml_text, namespace):
 
     all_pods = _list_namespace_pods(namespace)
     by_comp = {}
+    by_group = {}
     for p in all_pods:
         comp = _component_of_pod(p)
         by_comp.setdefault(comp, []).append(p)
+        grp = _network_group_of_pod(p)
+        by_group.setdefault(grp, []).append(p)
 
     changed = False
 
@@ -58,8 +81,11 @@ def expand_network_chaos_to_component_pods(wf_yaml_text, namespace):
         selector = (net.get("selector") or {}).get("pods") or {}
         src = selector.get(namespace)
         if isinstance(src, list) and src:
-            comps = sorted({_component_of_pod(p) for p in src if _component_of_pod(p) != "other"})
-            expanded = sorted({p for c in comps for p in by_comp.get(c, [])})
+            groups = sorted({_network_group_of_pod(p) for p in src if _network_group_of_pod(p) != "other"})
+            expanded = sorted({p for g in groups for p in by_group.get(g, [])})
+            if not expanded:
+                comps = sorted({_component_of_pod(p) for p in src if _component_of_pod(p) != "other"})
+                expanded = sorted({p for c in comps for p in by_comp.get(c, [])})
             if expanded and expanded != src:
                 selector[namespace] = expanded
                 changed = True
@@ -67,8 +93,11 @@ def expand_network_chaos_to_component_pods(wf_yaml_text, namespace):
         target = ((net.get("target") or {}).get("selector") or {}).get("pods") or {}
         dst = target.get(namespace)
         if isinstance(dst, list) and dst:
-            comps = sorted({_component_of_pod(p) for p in dst if _component_of_pod(p) != "other"})
-            expanded = sorted({p for c in comps for p in by_comp.get(c, [])})
+            groups = sorted({_network_group_of_pod(p) for p in dst if _network_group_of_pod(p) != "other"})
+            expanded = sorted({p for g in groups for p in by_group.get(g, [])})
+            if not expanded:
+                comps = sorted({_component_of_pod(p) for p in dst if _component_of_pod(p) != "other"})
+                expanded = sorted({p for c in comps for p in by_comp.get(c, [])})
             if expanded and expanded != dst:
                 target[namespace] = expanded
                 changed = True

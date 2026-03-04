@@ -51,6 +51,9 @@ def run_lmt_list_in_container(namespace, pod, container, login_ip, login_port, u
 
     send("export HOME=/tmp\n")
     out += read_until(master_fd, r".*", timeout=1)
+    # avoid echoed input lines polluting parsed command output
+    send("stty -echo\n")
+    out += read_until(master_fd, r".*", timeout=1)
 
     send("lmt-cli login --ip {} --port {} --username {}\n".format(login_ip, login_port, username))
     out += read_until(master_fd, r"(Enter Password:|Password:)", timeout=8)
@@ -127,8 +130,8 @@ def run_lmt_commands_in_container(
         chunk = read_until(master_fd, end, timeout=20)
         out += chunk
 
-        bi = chunk.find(begin)
-        ei = chunk.find(end)
+        ei = chunk.rfind(end)
+        bi = chunk.rfind(begin, 0, ei if ei >= 0 else None)
         seg = ""
         if bi >= 0 and ei > bi:
             seg = chunk[bi + len(begin):ei]

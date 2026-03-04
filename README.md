@@ -60,7 +60,9 @@ python3 -m chaos_runner.runner --case chaos_runner/cases/xxx.yaml
 例如：
 
 - `from` 里是单个 etcd Pod，会扩展为所有 etcd Pod；
-- `to` 里是单个 upc-lb/upu/upc Pod，会扩展为所有 upc 相关 Pod。
+- `to` 里是单个 upc-lb Pod，会扩展为所有 upc-lb Pod（同理 upu 只扩展到 upu 组）。
+
+注意：扩展是按 `from`/`to` 各自目标组分别进行，NetworkChaos 仅发生在这两组目标之间，不会扩展为 namespace 内所有 Pod 两两互通故障。
 
 ### 1.3 推荐查看方式
 

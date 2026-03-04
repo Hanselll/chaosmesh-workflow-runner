@@ -382,6 +382,21 @@ def _log_pod_table(case_log, title, pod_status_map):
         case_log.log("  {:<48} {:<12} {}".format(pod, row.get("status", ""), row.get("node", "")))
 
 
+def _log_replacements(case_log, replacements, title="[POST] Pod Replacement Mapping"):
+    if not replacements:
+        return
+    case_log.log(title)
+    for old_name in sorted(replacements.keys()):
+        item = replacements[old_name]
+        case_log.log(
+            "  {} -> {}@{}".format(
+                old_name,
+                item.get("new_name", "<unknown>"),
+                (item.get("row") or {}).get("node", "<unknown-node>"),
+            )
+        )
+
+
 def _log_role_state(case_log, title, role_state):
     case_log.log(title)
     if role_state.get("ddb"):
@@ -451,26 +466,24 @@ def collect_post_case_state(namespace, pre_state, case_log):
     role_state = _collect_role_state(involved_components)
     lmt_state = _collect_lmt(namespace)
 
+    post_all_map = _get_all_pod_status_map(namespace)
+    replacements = _build_replacement_map(pre_state.get("pre_pod_status") or {}, pod_status, post_all_map)
     _log_pod_table(case_log, "[POST] Pod Status", pod_status)
+    _log_replacements(case_log, replacements)
 
     case_log.log("[COMPARE] Pod PRE -> POST")
     case_log.log("  {:<48} {:<35} {:<35}".format("POD", "PRE(phase@node)", "POST(phase@node)"))
     case_log.log("  {}".format("-" * 130))
     pre_map = pre_state.get("pre_pod_status") or {}
     all_pods = sorted(set(pre_map.keys()) | set(pod_status.keys()))
-    post_all_map = _get_all_pod_status_map(namespace)
-    used_new = set()
     for pod in all_pods:
         pr = pre_map.get(pod) or {}
         po = pod_status.get(pod) or {}
         note = ""
-        if not po:
-            repl = _find_replacement_pod(pod, post_all_map, used_new)
-            if repl:
-                new_name, new_row = repl
-                po = {"status": new_row.get("status"), "node": new_row.get("node")}
-                note = "  -> replaced_by={}".format(new_name)
-                used_new.add(new_name)
+        if not po and pod in replacements:
+            repl = replacements[pod]
+            po = {"status": (repl.get("row") or {}).get("status"), "node": (repl.get("row") or {}).get("node")}
+            note = "  -> replaced_by={}".format(repl.get("new_name"))
         pre_txt = _fmt_phase_node(pr)
         post_txt = _fmt_phase_node(po)
         case_log.log("  {:<48} {:<35} {:<35}{}".format(pod, pre_txt, post_txt, note))
@@ -518,3 +531,18 @@ def _find_replacement_pod(pre_pod, post_all_map, used_new_pods):
     # Prefer running pod
     cands.sort(key=lambda x: (0 if (x[1].get("status") == "Running") else 1, x[0]))
     return cands[0]
+
+
+def _build_replacement_map(pre_map, post_target_map, post_all_map):
+    used_new = set()
+    out = {}
+    for pod in sorted(pre_map.keys()):
+        if pod in post_target_map:
+            continue
+        repl = _find_replacement_pod(pod, post_all_map, used_new)
+        if not repl:
+            continue
+        new_name, new_row = repl
+        used_new.add(new_name)
+        out[pod] = {"new_name": new_name, "row": new_row}
+    return out
