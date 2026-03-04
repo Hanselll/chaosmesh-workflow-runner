@@ -83,7 +83,14 @@ def run_lmt_commands_in_container(
     commands,
     raw_out_path="/tmp/lmt_raw_pty_multi.txt",
 ):
-    """Login once then execute a list of ``lmt-cli`` commands in interactive PTY."""
+    """Login once then execute commands in interactive PTY.
+
+    Returns:
+        {
+          "raw_output": "...",
+          "results": [{"command": "...", "output": "..."}, ...]
+        }
+    """
     master_fd, slave_fd = pty.openpty()
     set_nonblocking(master_fd)
 
@@ -112,10 +119,24 @@ def run_lmt_commands_in_container(
         open(raw_out_path, "w").write(out)
         raise RuntimeError("lmt login failed raw={}".format(raw_out_path))
 
-    for command in commands:
+    results = []
+    for idx, command in enumerate(commands):
+        begin = "__CMD_BEGIN_{}__".format(idx)
+        end = "__CMD_END_{}__".format(idx)
+        send("echo {}\n".format(begin))
+        out += read_until(master_fd, begin, timeout=5)
         send("{}\n".format(command))
-        out += read_until(master_fd, r"(currentItemCount=|Error:|No records|totalItems=|root@|#)", timeout=15)
-        out += read_until(master_fd, r"(root@|#)", timeout=2)
+        out += read_until(master_fd, r"(root@|#)", timeout=15)
+        send("echo {}\n".format(end))
+        out += read_until(master_fd, end, timeout=5)
+
+        frag = out
+        bi = frag.rfind(begin)
+        ei = frag.rfind(end)
+        seg = ""
+        if bi >= 0 and ei > bi:
+            seg = frag[bi + len(begin):ei]
+        results.append({"command": command, "output": seg.strip()})
 
     send("exit\n")
     send("exit\n")
@@ -126,4 +147,4 @@ def run_lmt_commands_in_container(
     except Exception:
         pass
     open(raw_out_path, "w").write(out)
-    return out
+    return {"raw_output": out, "results": results}

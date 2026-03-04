@@ -2,6 +2,8 @@
 import json
 from datetime import datetime
 
+import yaml
+
 from chaos_runner import config
 import chaos_runner.discover.ddb as ddb_discover
 import chaos_runner.discover.rc as rc_discover
@@ -24,19 +26,28 @@ class CaseLogger(object):
             f.write(line + "\n")
 
 
-def _flatten_target_pods(resolved):
-    names = set()
-    for v in (resolved or {}).values():
-        if isinstance(v, dict):
-            pod = v.get("pod")
-            if pod:
-                names.add(pod)
-            continue
-        if isinstance(v, list):
-            for it in v:
-                if isinstance(it, dict) and it.get("pod"):
-                    names.add(it.get("pod"))
-    return sorted(names)
+def extract_workflow_target_pods(wf_yaml_text, namespace):
+    """Extract concrete pod names that appear in generated Chaos Mesh workflow YAML."""
+    doc = yaml.safe_load(wf_yaml_text) or {}
+    out = set()
+
+    def walk(x):
+        if isinstance(x, dict):
+            pods = x.get("pods")
+            if isinstance(pods, dict):
+                ns_pods = pods.get(namespace)
+                if isinstance(ns_pods, list):
+                    for p in ns_pods:
+                        if isinstance(p, str) and p:
+                            out.add(p)
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for it in x:
+                walk(it)
+
+    walk(doc)
+    return sorted(out)
 
 
 def _get_pod_status_map(namespace, pod_names):
@@ -53,6 +64,21 @@ def _get_pod_status_map(namespace, pod_names):
     return out
 
 
+def _component_of_pod(name):
+    low = (name or "").lower()
+    if "ddb" in low:
+        return "ddb"
+    if "etcd" in low:
+        return "etcd"
+    if "registry" in low or "-rc-" in low or "dupf-rc" in low:
+        return "rc"
+    if "upc" in low or "upu" in low:
+        return "upc"
+    if "sdb" in low:
+        return "sdb"
+    return "other"
+
+
 def _find_oam_pod(namespace):
     data = json.loads(sh("kubectl -n {} get pod -o json".format(namespace)))
     for it in data.get("items", []):
@@ -63,38 +89,87 @@ def _find_oam_pod(namespace):
     raise RuntimeError("Cannot find oam pod in {}".format(namespace))
 
 
-def _collect_role_state():
+def _collect_role_state(involved_components):
     role = {}
 
-    role["ddb"] = {"masters": ddb_discover.find_ddb_masters(), "slaves": ddb_discover.find_ddb_non_masters()}
+    if "ddb" in involved_components:
+        role["ddb"] = {
+            "masters": ddb_discover.find_ddb_masters(),
+            "slaves": ddb_discover.find_ddb_non_masters(),
+        }
 
-    rc_cluster, rc_url = rc_discover.fetch_rc_cluster()
-    role["rc_source_url"] = rc_url
-    role["rc"] = {
-        "leader": rc_discover.find_rc_leader(rc_cluster),
-        "followers": rc_discover.find_rc_followers(rc_cluster),
-    }
-    role["etcd"] = {
-        "leader": rc_discover.find_etcd_leader(rc_cluster),
-        "followers": rc_discover.find_etcd_followers(rc_cluster),
-    }
+    if "rc" in involved_components or "etcd" in involved_components:
+        rc_cluster, rc_url = rc_discover.fetch_rc_cluster()
+        role["rc_source_url"] = rc_url
+        if "rc" in involved_components:
+            role["rc"] = {
+                "leader": rc_discover.find_rc_leader(rc_cluster),
+                "followers": rc_discover.find_rc_followers(rc_cluster),
+            }
+        if "etcd" in involved_components:
+            role["etcd"] = {
+                "leader": rc_discover.find_etcd_leader(rc_cluster),
+                "followers": rc_discover.find_etcd_followers(rc_cluster),
+            }
+
     return role
+
+
+def _parse_first_json_blob(text):
+    s = (text or "").strip()
+    if not s:
+        return None
+    lines = [ln for ln in s.splitlines() if ln.strip()]
+    # Ignore shell prompt/echo lines, prefer line that starts with JSON delimiters.
+    for ln in lines:
+        t = ln.strip()
+        if t.startswith("{") or t.startswith("["):
+            try:
+                return json.loads(t)
+            except Exception:
+                pass
+    # fallback: search by first { or [
+    for ch in ("{", "["):
+        idx = s.find(ch)
+        if idx >= 0:
+            try:
+                return json.loads(s[idx:])
+            except Exception:
+                continue
+    return None
+
+
+def _render_lmt_compact(command, parsed):
+    title = command.replace("lmt-cli list", "").strip()
+    if parsed is None:
+        return ["{} => <parse-failed>".format(title)]
+    if isinstance(parsed, list):
+        lines = ["{} => count={}".format(title, len(parsed))]
+        for i, item in enumerate(parsed, 1):
+            lines.append("  [{}] {}".format(i, json.dumps(item, ensure_ascii=False, sort_keys=True)))
+        return lines
+    if isinstance(parsed, dict):
+        keys = sorted(parsed.keys())
+        lines = ["{} => keys={}".format(title, ",".join(keys))]
+        lines.append("  {}".format(json.dumps(parsed, ensure_ascii=False, sort_keys=True)))
+        return lines
+    return ["{} => {}".format(title, str(parsed))]
 
 
 def _collect_lmt(namespace):
     oam_pod = _find_oam_pod(namespace)
     commands = [
-        "lmt-cli list upfGetTalkerRole --format table",
-        "lmt-cli list upfGetNodeAssociateInfo --format table",
-        "lmt-cli list upfGetLicenseUsage --format table",
-        "lmt-cli list upfGetSessionNum --format table",
-        "lmt-cli list upfGetUpcSessionNum --format table",
-        "lmt-cli list upfGetUpuInstanceStatus --format table",
-        "lmt-cli list upfGetWholeMachineRate --format table",
-        "lmt-cli list upfGetUpuForwardRate --format table",
-        "lmt-cli list upfGetRoleInterfaceRate --format table",
+        "lmt-cli list upfGetTalkerRole",
+        "lmt-cli list upfGetNodeAssociateInfo",
+        "lmt-cli list upfGetLicenseUsage",
+        "lmt-cli list upfGetSessionNum",
+        "lmt-cli list upfGetUpcSessionNum",
+        "lmt-cli list upfGetUpuInstanceStatus",
+        "lmt-cli list upfGetWholeMachineRate",
+        "lmt-cli list upfGetUpuForwardRate",
+        "lmt-cli list upfGetRoleInterfaceRate",
     ]
-    out = run_lmt_commands_in_container(
+    ret = run_lmt_commands_in_container(
         namespace,
         oam_pod,
         config.OAM_CONTAINER,
@@ -104,96 +179,165 @@ def _collect_lmt(namespace):
         config.LMT_PASSWORD,
         commands,
     )
-    return {"oam_pod": oam_pod, "commands": commands, "raw_output": out}
+
+    rows = []
+    for item in ret.get("results") or []:
+        parsed = _parse_first_json_blob(item.get("output"))
+        rows.append({"command": item.get("command"), "parsed": parsed, "raw": item.get("output", "")})
+
+    return {"oam_pod": oam_pod, "rows": rows, "raw_output": ret.get("raw_output", "")}
 
 
-def _event_count(it):
-    series = it.get("series") or {}
-    if series.get("count"):
-        return int(series.get("count"))
-    if it.get("count"):
-        return int(it.get("count"))
-    return 1
-
-
-def _collect_target_events(namespace, pod_names):
-    data = json.loads(sh("kubectl -n {} get events -o json".format(namespace), check=False) or "{}")
-    out = []
+def _collect_target_events_rows(namespace, pod_names):
+    out = sh(
+        "kubectl get events -n {} -o=custom-columns="
+        "LASTSEEN:.lastTimestamp,TYPE:.type,REASON:.reason,OBJECT_KIND:.involvedObject.kind,"
+        "OBJECT_NAME:.involvedObject.name,MESSAGE:.message --no-headers".format(namespace),
+        check=False,
+    )
     pods = set(pod_names)
-    for it in data.get("items", []):
-        inv = it.get("involvedObject") or {}
-        if inv.get("kind") != "Pod":
+    rows = []
+    for line in (out or "").splitlines():
+        if not line.strip():
             continue
-        if inv.get("name") not in pods:
+        cols = line.split(None, 5)
+        if len(cols) < 6:
             continue
-        out.append(it)
-    return out
+        last, typ, reason, kind, obj_name, msg = cols
+        if kind != "Pod":
+            continue
+        if obj_name not in pods:
+            continue
+        rows.append(
+            {
+                "LASTSEEN": last,
+                "TYPE": typ,
+                "REASON": reason,
+                "OBJECT_KIND": kind,
+                "OBJECT_NAME": obj_name,
+                "MESSAGE": msg,
+            }
+        )
+    return rows
 
 
-def _build_event_snapshot(events):
+def _event_key(r):
+    return "|".join([r.get("TYPE", ""), r.get("REASON", ""), r.get("OBJECT_NAME", ""), r.get("MESSAGE", "")])
+
+
+def _build_event_snapshot(rows):
     snap = {}
-    for it in events:
-        uid = ((it.get("metadata") or {}).get("uid") or "")
-        if not uid:
-            continue
-        snap[uid] = _event_count(it)
+    for r in rows:
+        k = _event_key(r)
+        snap[k] = snap.get(k, 0) + 1
     return snap
 
 
-def _diff_events(before_snapshot, after_events):
-    new_items = []
-    for it in after_events:
-        uid = ((it.get("metadata") or {}).get("uid") or "")
-        after_count = _event_count(it)
-        before_count = before_snapshot.get(uid, 0)
-        if after_count > before_count:
-            new_items.append(it)
-    return new_items
+def _diff_events(before_snapshot, after_rows):
+    cnt = dict(before_snapshot or {})
+    new_rows = []
+    for r in after_rows:
+        k = _event_key(r)
+        if cnt.get(k, 0) > 0:
+            cnt[k] -= 1
+            continue
+        new_rows.append(r)
+    return new_rows
 
 
-def collect_pre_case_state(namespace, resolved, case_log):
-    target_pods = _flatten_target_pods(resolved)
-    pod_status = _get_pod_status_map(namespace, target_pods)
-    role_state = _collect_role_state()
+def _log_pod_table(case_log, title, pod_status_map):
+    case_log.log(title)
+    case_log.log("  {:<48} {:<12} {}".format("POD", "PHASE", "NODE"))
+    case_log.log("  {}".format("-" * 110))
+    for pod in sorted(pod_status_map.keys()):
+        row = pod_status_map[pod]
+        case_log.log("  {:<48} {:<12} {}".format(pod, row.get("status", ""), row.get("node", "")))
+
+
+def _log_role_state(case_log, title, role_state):
+    case_log.log(title)
+    if role_state.get("ddb"):
+        ddb = role_state["ddb"]
+        case_log.log("  DDB masters: {}".format(", ".join(["{}({})".format(x.get("pod"), x.get("ip")) for x in ddb.get("masters", [])]) or "<none>"))
+        case_log.log("  DDB slaves : {}".format(", ".join(["{}({})".format(x.get("pod"), x.get("ip")) for x in ddb.get("slaves", [])]) or "<none>"))
+    if role_state.get("rc"):
+        rc = role_state["rc"]
+        leader = rc.get("leader") or {}
+        case_log.log("  RC leader  : {}({})".format(leader.get("pod", ""), leader.get("ip", "")))
+        case_log.log("  RC followers: {}".format(", ".join(["{}({})".format(x.get("pod"), x.get("ip")) for x in rc.get("followers", [])]) or "<none>"))
+    if role_state.get("etcd"):
+        etcd = role_state["etcd"]
+        leader = etcd.get("leader") or {}
+        case_log.log("  ETCD leader: {}({})".format(leader.get("pod", ""), leader.get("ip", "")))
+        case_log.log("  ETCD followers: {}".format(", ".join(["{}({})".format(x.get("pod"), x.get("ip")) for x in etcd.get("followers", [])]) or "<none>"))
+
+
+def _log_lmt(case_log, title, lmt_state):
+    case_log.log("{} (oam={})".format(title, lmt_state.get("oam_pod", "")))
+    for row in lmt_state.get("rows", []):
+        for line in _render_lmt_compact(row.get("command", ""), row.get("parsed")):
+            case_log.log("  {}".format(line))
+
+
+def collect_pre_case_state(namespace, workflow_target_pods, case_log):
+    if not workflow_target_pods:
+        case_log.log("[PRE] workflow selected pods is empty")
+    involved_components = sorted({_component_of_pod(p) for p in workflow_target_pods if _component_of_pod(p) != "other"})
+
+    pod_status = _get_pod_status_map(namespace, workflow_target_pods)
+    role_state = _collect_role_state(involved_components)
     lmt_state = _collect_lmt(namespace)
-    events = _collect_target_events(namespace, target_pods)
-    event_snapshot = _build_event_snapshot(events)
+    events_rows = _collect_target_events_rows(namespace, workflow_target_pods)
+    event_snapshot = _build_event_snapshot(events_rows)
 
-    case_log.log("[PRE] target pods={}".format(target_pods))
-    case_log.log("[PRE] pod status/node={}".format(json.dumps(pod_status, ensure_ascii=False)))
-    case_log.log("[PRE] component roles={}".format(json.dumps(role_state, ensure_ascii=False)))
-    case_log.log("[PRE] lmt oam pod={}".format(lmt_state["oam_pod"]))
-    case_log.log("[PRE] lmt output:\n{}".format(lmt_state["raw_output"]))
-    case_log.log("[PRE] event snapshot size={}".format(len(event_snapshot)))
+    case_log.log("[PRE] workflow selected pods count={} components={}".format(len(workflow_target_pods), involved_components))
+    _log_pod_table(case_log, "[PRE] Pod Status", pod_status)
+    _log_role_state(case_log, "[PRE] Component Overall Role State", role_state)
+    _log_lmt(case_log, "[PRE] LMT Business Snapshot", lmt_state)
 
-    return {"target_pods": target_pods, "event_snapshot": event_snapshot}
+    case_log.log("[PRE] Target Events Baseline")
+    case_log.log("  LASTSEEN TYPE REASON OBJECT_KIND OBJECT_NAME MESSAGE")
+    for r in events_rows:
+        case_log.log("  {LASTSEEN} {TYPE} {REASON} {OBJECT_KIND} {OBJECT_NAME} {MESSAGE}".format(**r))
+
+    return {
+        "target_pods": workflow_target_pods,
+        "event_snapshot": event_snapshot,
+        "pre_pod_status": pod_status,
+        "involved_components": involved_components,
+    }
 
 
 def collect_post_case_state(namespace, pre_state, case_log):
     target_pods = pre_state.get("target_pods") or []
+    involved_components = pre_state.get("involved_components") or []
+
     pod_status = _get_pod_status_map(namespace, target_pods)
-    role_state = _collect_role_state()
+    role_state = _collect_role_state(involved_components)
     lmt_state = _collect_lmt(namespace)
 
-    after_events = _collect_target_events(namespace, target_pods)
+    after_events = _collect_target_events_rows(namespace, target_pods)
     runtime_new_events = _diff_events(pre_state.get("event_snapshot") or {}, after_events)
 
-    case_log.log("[POST] pod status/node={}".format(json.dumps(pod_status, ensure_ascii=False)))
-    case_log.log("[POST] component roles={}".format(json.dumps(role_state, ensure_ascii=False)))
-    case_log.log("[POST] lmt oam pod={}".format(lmt_state["oam_pod"]))
-    case_log.log("[POST] lmt output:\n{}".format(lmt_state["raw_output"]))
-    case_log.log("[POST] runtime events count={}".format(len(runtime_new_events)))
-    for it in runtime_new_events:
-        meta = it.get("metadata") or {}
-        inv = it.get("involvedObject") or {}
-        ts = it.get("eventTime") or it.get("lastTimestamp") or it.get("firstTimestamp") or meta.get("creationTimestamp")
-        case_log.log(
-            "[POST][EVENT] time={} pod={} type={} reason={} message={} count={}".format(
-                ts,
-                inv.get("name", ""),
-                it.get("type", ""),
-                it.get("reason", ""),
-                (it.get("message", "") or "").replace("\n", " "),
-                _event_count(it),
-            )
-        )
+    _log_pod_table(case_log, "[POST] Pod Status", pod_status)
+
+    # sequential comparison for pod pre/post
+    case_log.log("[COMPARE] Pod PRE -> POST")
+    case_log.log("  {:<48} {:<35} {:<35}".format("POD", "PRE(phase@node)", "POST(phase@node)"))
+    case_log.log("  {}".format("-" * 130))
+    pre_map = pre_state.get("pre_pod_status") or {}
+    all_pods = sorted(set(pre_map.keys()) | set(pod_status.keys()))
+    for pod in all_pods:
+        pr = pre_map.get(pod) or {}
+        po = pod_status.get(pod) or {}
+        pre_txt = "{}@{}".format(pr.get("status", ""), pr.get("node", ""))
+        post_txt = "{}@{}".format(po.get("status", ""), po.get("node", ""))
+        case_log.log("  {:<48} {:<35} {:<35}".format(pod, pre_txt, post_txt))
+
+    _log_role_state(case_log, "[POST] Component Overall Role State", role_state)
+    _log_lmt(case_log, "[POST] LMT Business Snapshot", lmt_state)
+
+    case_log.log("[POST] Runtime Target Events")
+    case_log.log("  LASTSEEN TYPE REASON OBJECT_KIND OBJECT_NAME MESSAGE")
+    for r in runtime_new_events:
+        case_log.log("  {LASTSEEN} {TYPE} {REASON} {OBJECT_KIND} {OBJECT_NAME} {MESSAGE}".format(**r))

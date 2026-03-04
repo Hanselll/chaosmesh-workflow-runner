@@ -20,7 +20,12 @@ if PARENT_DIR not in sys.path:
 from chaos_runner import config
 from chaos_runner.workflow_factory.factory import build
 from chaos_runner.executor.executor import run_workflow
-from chaos_runner.executor.observer import CaseLogger, collect_pre_case_state, collect_post_case_state
+from chaos_runner.executor.observer import (
+    CaseLogger,
+    collect_pre_case_state,
+    collect_post_case_state,
+    extract_workflow_target_pods,
+)
 from chaos_runner.tools.k8s import sh
 
 def write_yaml_to_tmp(wf_name, yaml_text):
@@ -67,7 +72,9 @@ def main():
     case_log.log("generated workflow yaml: {}".format(path))
     case_log.log("resolved targets: {}".format(resolved))
 
-    pre_state = collect_pre_case_state(config.NS_TARGET, resolved, case_log)
+    workflow_target_pods = extract_workflow_target_pods(wf_yaml, config.NS_TARGET)
+    case_log.log("workflow selected pods: {}".format(workflow_target_pods))
+    pre_state = collect_pre_case_state(config.NS_TARGET, workflow_target_pods, case_log)
 
     # ✅ dry-run：到此结束，不 kubectl apply
     if args.dry_run:
