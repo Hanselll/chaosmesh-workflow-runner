@@ -24,8 +24,9 @@ from chaos_runner.executor.observer import (
     CaseLogger,
     collect_pre_case_state,
     collect_post_case_state,
-    extract_workflow_target_pods,
+    extract_podchaos_target_pods,
 )
+from chaos_runner.workflow_factory.postprocess import expand_network_chaos_to_component_pods
 from chaos_runner.tools.k8s import sh
 
 def write_yaml_to_tmp(wf_name, yaml_text):
@@ -52,6 +53,7 @@ def main():
     wf_ns = wf.get("namespace") or config.WF_NAMESPACE
 
     wf_yaml, resolved = build(case, config)
+    wf_yaml = expand_network_chaos_to_component_pods(wf_yaml, config.NS_TARGET)
     case_ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
     case_log_path = "/tmp/chaos_case_{}_{}.log".format(wf_name, case_ts)
     case_log = CaseLogger(case_log_path)
@@ -72,9 +74,9 @@ def main():
     case_log.log("generated workflow yaml: {}".format(path))
     case_log.log("resolved targets: {}".format(resolved))
 
-    workflow_target_pods = extract_workflow_target_pods(wf_yaml, config.NS_TARGET)
-    case_log.log("workflow selected pods: {}".format(workflow_target_pods))
-    pre_state = collect_pre_case_state(config.NS_TARGET, workflow_target_pods, case_log)
+    podchaos_target_pods = extract_podchaos_target_pods(wf_yaml, config.NS_TARGET)
+    case_log.log("podchaos selected pods: {}".format(podchaos_target_pods))
+    pre_state = collect_pre_case_state(config.NS_TARGET, podchaos_target_pods, case_log)
 
     # ✅ dry-run：到此结束，不 kubectl apply
     if args.dry_run:

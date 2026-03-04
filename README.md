@@ -29,7 +29,7 @@ python3 -m chaos_runner.runner --case chaos_runner/cases/xxx.yaml
 
 每次执行会记录以下内容（PRE/POST 各一份）：
 
-1. targets 相关 Pod 信息
+1. PodChaos 相关 Pod 信息（仅统计 PodChaos 最终选中的 Pod，不包含 NetworkChaos 选中的 Pod）
    - Pod 名称
    - Pod 运行状态（phase）
    - 所在节点（nodeName）
@@ -38,19 +38,27 @@ python3 -m chaos_runner.runner --case chaos_runner/cases/xxx.yaml
    - RC：leader / followers
    - ETCD：leader / followers
 3. 业务侧 LMT 信息（在 OAM 容器内执行）
-   - 通过 JSON 输出采集（不带 `--format table`），并整理为便于 PRE/POST 对比的紧凑格式
-   - `lmt-cli list upfGetTalkerRole`
-   - `lmt-cli list upfGetNodeAssociateInfo`
-   - `lmt-cli list upfGetLicenseUsage`
-   - `lmt-cli list upfGetSessionNum`
-   - `lmt-cli list upfGetUpcSessionNum`
-   - `lmt-cli list upfGetUpuInstanceStatus`
-   - `lmt-cli list upfGetWholeMachineRate`
-   - `lmt-cli list upfGetUpuForwardRate`
-   - `lmt-cli list upfGetRoleInterfaceRate`
-4. 与 targets Pod 相关的 k8s 事件
-   - PRE 阶段记录事件快照基线
-   - POST 阶段记录运行期间新增/计数增加的事件
+   - 使用 JSON 输出采集（`--format json`），并整理成便于 PRE/POST 对比的格式
+   - `lmt-cli list upfGetTalkerRole --format json`
+   - `lmt-cli list upfGetNodeAssociateInfo --format json`
+   - `lmt-cli list upfGetLicenseUsage --format json`
+   - `lmt-cli list upfGetSessionNum --format json`
+   - `lmt-cli list upfGetUpcSessionNum --format json`
+   - `lmt-cli list upfGetUpuInstanceStatus --format json`
+   - `lmt-cli list upfGetWholeMachineRate --format json`
+   - `lmt-cli list upfGetUpuForwardRate --format json`
+   - `lmt-cli list upfGetRoleInterfaceRate --format json`
+4. 与 PodChaos 目标 Pod 相关的 k8s 事件
+   - 仅在 POST 记录本次执行期间产生的事件（不再记录 PRE 基线）
+
+### 1.4 NetworkChaos 目标扩展说明（新增）
+
+对于 NetworkChaos，runner 会将 `from/to` 中选中的 Pod 自动扩展为其所属组件的全部 Pod，再写入最终 workflow YAML。
+
+例如：
+
+- `from` 里是单个 etcd Pod，会扩展为所有 etcd Pod；
+- `to` 里是单个 upc-lb/upu/upc Pod，会扩展为所有 upc 相关 Pod。
 
 ### 1.3 推荐查看方式
 
@@ -59,7 +67,7 @@ python3 -m chaos_runner.runner --case chaos_runner/cases/xxx.yaml
 tail -f /tmp/chaos_case_<workflow-name>_<timestamp>.log
 
 # 快速定位事件记录
-grep "\[POST\]\[EVENT\]" /tmp/chaos_case_<workflow-name>_<timestamp>.log
+grep "Runtime Target Events" -n /tmp/chaos_case_<workflow-name>_<timestamp>.log
 ```
 
 常用字段：
