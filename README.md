@@ -38,7 +38,7 @@ python3 -m chaos_runner.runner --case chaos_runner/cases/xxx.yaml
    - RC：leader / followers
    - ETCD：leader / followers
 3. 业务侧 LMT 信息（在 OAM 容器内执行）
-   - 直接使用默认 JSON 输出采集（不加格式后缀），并整理成便于 PRE/POST 对比的格式
+   - 直接使用默认 JSON 输出采集（不加格式后缀），并整理成便于 PRE/POST 对比的可读格式（按记录分段、JSON 缩进展示）
    - `lmt-cli list upfGetTalkerRole`
    - `lmt-cli list upfGetNodeAssociateInfo`
    - `lmt-cli list upfGetLicenseUsage`

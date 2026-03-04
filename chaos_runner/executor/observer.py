@@ -175,21 +175,77 @@ def _parse_lmt_output(output):
     return None
 
 
+def _try_parse_json_string(val):
+    if not isinstance(val, str):
+        return None
+    s = val.strip()
+    if not s or (not s.startswith("{") and not s.startswith("[")):
+        return None
+    try:
+        return json.loads(s)
+    except Exception:
+        return None
+
+
+def _normalize_lmt_obj(obj):
+    """Recursively decode JSON-string fields for easier log reading."""
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            parsed = _try_parse_json_string(v)
+            out[k] = _normalize_lmt_obj(parsed if parsed is not None else v)
+        return out
+    if isinstance(obj, list):
+        return [_normalize_lmt_obj(x) for x in obj]
+    return obj
+
+
+def _pretty_json_lines(obj):
+    text = json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True)
+    return text.splitlines()
+
+
 def _render_lmt_compact(command, parsed):
     title = command.replace("lmt-cli list", "").strip()
     if parsed is None:
         return ["{} => <parse-failed>".format(title)]
-    if isinstance(parsed, list):
-        lines = ["{} => count={}".format(title, len(parsed))]
-        for i, item in enumerate(parsed, 1):
-            lines.append("  [{}] {}".format(i, json.dumps(item, ensure_ascii=False, sort_keys=True)))
+
+    normalized = _normalize_lmt_obj(parsed)
+    lines = []
+
+    if isinstance(normalized, dict):
+        c = normalized.get("currentItemCount")
+        t = normalized.get("totalItems")
+        p = normalized.get("pageIndex")
+        meta = []
+        if c is not None:
+            meta.append("currentItemCount={}".format(c))
+        if t is not None:
+            meta.append("totalItems={}".format(t))
+        if p is not None:
+            meta.append("pageIndex={}".format(p))
+        lines.append("{}{}".format(title, (" => " + ", ".join(meta)) if meta else ""))
+
+        records = normalized.get("records")
+        if isinstance(records, list):
+            for i, rec in enumerate(records, 1):
+                lines.append("  record[{}]:".format(i))
+                for ln in _pretty_json_lines(rec):
+                    lines.append("    {}".format(ln))
+            return lines
+
+    if isinstance(normalized, list):
+        lines.append("{} => count={}".format(title, len(normalized)))
+        for i, item in enumerate(normalized, 1):
+            lines.append("  item[{}]:".format(i))
+            for ln in _pretty_json_lines(item):
+                lines.append("    {}".format(ln))
         return lines
-    if isinstance(parsed, dict):
-        keys = sorted(parsed.keys())
-        lines = ["{} => keys={}".format(title, ",".join(keys))]
-        lines.append("  {}".format(json.dumps(parsed, ensure_ascii=False, sort_keys=True)))
-        return lines
-    return ["{} => {}".format(title, str(parsed))]
+
+    lines.append("{}:".format(title))
+    for ln in _pretty_json_lines(normalized):
+        lines.append("  {}".format(ln))
+    return lines
 
 
 def _collect_lmt(namespace):
