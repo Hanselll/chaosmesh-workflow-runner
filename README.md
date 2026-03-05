@@ -52,6 +52,7 @@ python3 -m chaos_runner.runner --case chaos_runner/cases/xxx.yaml
    - `lmt-cli list upfGetRoleInterfaceRate --format table`
 4. 与 PodChaos 目标 Pod 相关的 k8s 事件
    - 仅在 POST 记录本次执行期间产生的事件（不再记录 PRE 基线）
+   - 若目标 Pod 被重建并更名，也会一并记录新 Pod 相关事件
 
 ### 1.4 NetworkChaos 目标扩展说明（新增）
 

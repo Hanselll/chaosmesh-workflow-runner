@@ -484,7 +484,14 @@ def collect_post_case_state(namespace, pre_state, case_log):
 
     post_all_map = _get_all_pod_status_map(namespace)
     replacements = _build_replacement_map(pre_state.get("pre_pod_status") or {}, pod_status, post_all_map)
-    _log_pod_table(case_log, "[POST] Pod Status", pod_status)
+    post_display_map = dict(pod_status)
+    for old_name, item in replacements.items():
+        new_name = item.get("new_name")
+        row = item.get("row") or {}
+        if new_name and new_name not in post_display_map:
+            post_display_map[new_name] = {"status": row.get("status"), "node": row.get("node")}
+
+    _log_pod_table(case_log, "[POST] Pod Status", post_display_map)
     _log_replacements(case_log, replacements)
 
     case_log.log("[COMPARE] Pod PRE -> POST")
@@ -507,7 +514,11 @@ def collect_post_case_state(namespace, pre_state, case_log):
     _log_role_state(case_log, "[POST] Component Overall Role State", role_state)
     _log_lmt_pre_post_compare(case_log, pre_state.get("pre_lmt_state") or {}, lmt_state)
 
-    runtime_events = _collect_target_events_rows(namespace, target_pods, since_time=pre_state.get("run_start"))
+    event_pods = set(target_pods)
+    for item in replacements.values():
+        if item.get("new_name"):
+            event_pods.add(item.get("new_name"))
+    runtime_events = _collect_target_events_rows(namespace, sorted(event_pods), since_time=pre_state.get("run_start"))
     case_log.log("[POST] Runtime Target Events")
     case_log.log("  LASTSEEN TYPE REASON OBJECT_KIND OBJECT_NAME MESSAGE")
     for r in runtime_events:

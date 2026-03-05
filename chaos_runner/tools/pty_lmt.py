@@ -51,6 +51,9 @@ def run_lmt_list_in_container(namespace, pod, container, login_ip, login_port, u
 
     send("export HOME=/tmp\n")
     out += read_until(master_fd, r".*", timeout=1)
+    # disable terminal echo to avoid marker text being echoed before command finishes
+    send("stty -echo\n")
+    out += read_until(master_fd, r".*", timeout=1)
     # avoid echoed input lines polluting parsed command output
     send("stty -echo\n")
     out += read_until(master_fd, r".*", timeout=1)
