@@ -54,6 +54,8 @@ def run_lmt_list_in_container(namespace, pod, container, login_ip, login_port, u
     # disable terminal echo to avoid marker text being echoed before command finishes
     send("stty -echo\n")
     out += read_until(master_fd, r".*", timeout=1)
+    send("export PS1='__PROMPT__# '\n")
+    out += read_until(master_fd, r"__PROMPT__#", timeout=3)
     # avoid echoed input lines polluting parsed command output
     send("stty -echo\n")
     out += read_until(master_fd, r".*", timeout=1)
@@ -116,6 +118,10 @@ def run_lmt_commands_in_container(
 
     send("export HOME=/tmp\n")
     out += read_until(master_fd, r".*", timeout=1)
+    send("stty -echo\n")
+    out += read_until(master_fd, r".*", timeout=1)
+    send("export PS1='__PROMPT__# '\n")
+    out += read_until(master_fd, r"__PROMPT__#", timeout=3)
 
     send("lmt-cli login --ip {} --port {} --username {}\n".format(login_ip, login_port, username))
     out += read_until(master_fd, r"(Enter Password:|Password:)", timeout=8)
@@ -128,18 +134,25 @@ def run_lmt_commands_in_container(
     results = []
     for idx, command in enumerate(commands):
         begin = "__CMD_BEGIN_{}__".format(idx)
-        end = "__CMD_END_{}__".format(idx)
-        send("printf '{b}\\n'\n{cmd}\nprintf '{e}\\n'\n".format(b=begin, cmd=command, e=end))
+        end = "__CMD_DONE_{}__".format(idx)
+        send("printf '{b}\\n'; {cmd}; printf '\\n{e}\\n'\n".format(b=begin, cmd=command, e=end))
         # LMT table output may take longer in busy env; use larger timeout.
         chunk = read_until(master_fd, re.escape(end), timeout=90)
         out += chunk
 
-        # Extract from accumulated output to tolerate fragmented reads.
-        ei = out.rfind(end)
-        bi = out.rfind(begin, 0, ei if ei >= 0 else None)
+        # Prefer parsing the current chunk first; fallback to accumulated output.
+        ei = chunk.rfind(end)
+        bi = chunk.rfind(begin, 0, ei if ei >= 0 else None)
         seg = ""
         if bi >= 0 and ei > bi:
-            seg = out[bi + len(begin):ei]
+            seg = chunk[bi + len(begin):ei]
+        else:
+            ei2 = out.rfind(end)
+            bi2 = out.rfind(begin, 0, ei2 if ei2 >= 0 else None)
+            if bi2 >= 0 and ei2 > bi2:
+                seg = out[bi2 + len(begin):ei2]
+            elif ei >= 0:
+                seg = chunk[:ei]
         results.append({"command": command, "output": seg.strip()})
 
     send("exit\n")
