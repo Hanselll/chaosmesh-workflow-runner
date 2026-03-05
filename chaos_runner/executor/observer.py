@@ -431,23 +431,13 @@ def _log_role_state(case_log, title, role_state):
         case_log.log("  ETCD followers: {}".format(", ".join(["{}({})".format(x.get("pod"), x.get("ip")) for x in etcd.get("followers", [])]) or "<none>"))
 
 
-def _log_lmt_pre_post_compare(case_log, pre_lmt_state, post_lmt_state):
-    case_log.log("[COMPARE] LMT PRE -> POST (oam={})".format(post_lmt_state.get("oam_pod", "")))
-    pre_rows = {r.get("command"): r for r in (pre_lmt_state.get("rows") or [])}
-    post_rows = {r.get("command"): r for r in (post_lmt_state.get("rows") or [])}
-    commands = [r.get("command") for r in (pre_lmt_state.get("rows") or [])]
-    for c in post_rows.keys():
-        if c not in commands:
-            commands.append(c)
-
-    for cmd in commands:
-        title = _table_name(cmd)
-        pre_table = (pre_rows.get(cmd) or {}).get("table_text", "")
-        post_table = (post_rows.get(cmd) or {}).get("table_text", "")
-        case_log.log("  [{}] PRE".format(title))
-        case_log.log("{}".format(pre_table if pre_table else "    <empty; raw=/tmp/lmt_raw_pty_multi.txt>"))
-        case_log.log("  [{}] POST".format(title))
-        case_log.log("{}".format(post_table if post_table else "    <empty; raw=/tmp/lmt_raw_pty_multi.txt>"))
+def _log_lmt_snapshot(case_log, lmt_state, phase):
+    case_log.log("[{}] LMT Business Snapshot (oam={})".format(phase, lmt_state.get("oam_pod", "")))
+    for row in (lmt_state.get("rows") or []):
+        title = _table_name(row.get("command", ""))
+        table = row.get("table_text", "")
+        case_log.log("  [{}]".format(title))
+        case_log.log("{}".format(table if table else "    <empty; raw=/tmp/lmt_raw_pty_multi.txt>"))
 
 
 def collect_pre_case_state(namespace, podchaos_target_pods, case_log):
@@ -463,7 +453,7 @@ def collect_pre_case_state(namespace, podchaos_target_pods, case_log):
     case_log.log("[PRE] podchaos selected pods count={} components={}".format(len(podchaos_target_pods), involved_components))
     _log_pod_table(case_log, "[PRE] Pod Status", pod_status)
     _log_role_state(case_log, "[PRE] Component Overall Role State", role_state)
-    case_log.log("[PRE] LMT Business Snapshot captured (oam={})".format(lmt_state.get("oam_pod", "")))
+    _log_lmt_snapshot(case_log, lmt_state, "PRE")
 
     return {
         "target_pods": podchaos_target_pods,
@@ -512,7 +502,7 @@ def collect_post_case_state(namespace, pre_state, case_log):
         case_log.log("  {:<48} {:<35} {:<35}{}".format(pod, pre_txt, post_txt, note))
 
     _log_role_state(case_log, "[POST] Component Overall Role State", role_state)
-    _log_lmt_pre_post_compare(case_log, pre_state.get("pre_lmt_state") or {}, lmt_state)
+    _log_lmt_snapshot(case_log, lmt_state, "POST")
 
     event_pods = set(target_pods)
     for item in replacements.values():

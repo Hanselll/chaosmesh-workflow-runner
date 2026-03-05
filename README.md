@@ -40,7 +40,7 @@ python3 -m chaos_runner.runner --case chaos_runner/cases/xxx.yaml
    - ETCD：leader / followers
 3. 业务侧 LMT 信息（在 OAM 容器内执行）
    - 使用 table 形式采集（`--format table`）
-   - 同一个命令的 PRE/POST 表格会紧挨着显示，方便对比
+   - 日志顺序为：先打印所有 PRE 表格，再打印所有 POST 表格
    - `lmt-cli list upfGetTalkerRole --format table`
    - `lmt-cli list upfGetNodeAssociateInfo --format table`
    - `lmt-cli list upfGetLicenseUsage --format table`
