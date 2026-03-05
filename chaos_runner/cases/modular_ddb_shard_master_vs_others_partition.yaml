@@ -3,24 +3,26 @@ namespace: default
 
 mode: modular_chaos
 
-# 指定一个分片（如 0 / shd-0），将该分片 master 与“其他所有分片 DDB 实例”做网络分区
+# 指定一个分片（如 0 / shd-0），将该分片 master 与以下集合做网络分区：
+# 1) 本分片的 slaves
+# 2) 其他分片全部 DDB 实例（masters + slaves）
 
 targets:
   - id: ddb_shard0_master
     finder: ddb_shard_master
     shard: "0"
 
-  - id: ddb_other_shards
-    finder: ddb_other_shard_pods
+  - id: ddb_shard0_master_peers
+    finder: ddb_shard_master_peers
     shard: "0"
 
 chaos:
   steps:
-    - id: partition_shard0_master_from_other_shards
+    - id: partition_shard0_master_from_peers
       action:
         type: network_partition
         params:
           from: ddb_shard0_master
-          to: ddb_other_shards
+          to: ddb_shard0_master_peers
           direction: both
           duration: 120s

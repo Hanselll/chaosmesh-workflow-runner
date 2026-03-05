@@ -3,77 +3,28 @@ import re
 from chaos_runner.tools.k8s import exec_in_pod, get_ns_pod_ip_map
 from chaos_runner import config
 
+
 def _cluster_nodes_raw():
     cmd = 'export REDISCLI_AUTH="{auth}"; redis-cli -p {port} cluster nodes'.format(auth=config.REDIS_AUTH, port=int(config.REDIS_PORT))
     raw = exec_in_pod(config.NS_TARGET, config.DDB_EXEC_POD, cmd)
-    open("/tmp/ddb_cluster_nodes.txt","w").write(raw)
+    open("/tmp/ddb_cluster_nodes.txt", "w").write(raw)
     return raw
 
+
 def _parse_master_ips(raw):
-    ips=[]
+    ips = []
     for line in (raw or "").splitlines():
-        parts=line.split()
-        if len(parts)<3:
+        parts = line.split()
+        if len(parts) < 3:
             continue
-        addr=parts[1]; flags=parts[2]
+        addr = parts[1]
+        flags = parts[2]
         if "master" not in flags:
             continue
-        ip=addr.split(":")[0]
+        ip = addr.split(":")[0]
         if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip) and ip not in ips:
             ips.append(ip)
     return ips
-
-def find_ddb_masters():
-    raw=_cluster_nodes_raw()
-    ips=_parse_master_ips(raw)
-    if len(ips) < int(config.EXPECTED_MASTER_COUNT):
-        raise RuntimeError("masters ips too few: {} raw=/tmp/ddb_cluster_nodes.txt".format(ips))
-    ip2pod=get_ns_pod_ip_map(config.NS_TARGET)
-    out=[]; miss=[]
-    for ip in ips[:int(config.EXPECTED_MASTER_COUNT)]:
-        pod=ip2pod.get(ip)
-        if not pod: miss.append(ip)
-        else: out.append({"pod": pod, "ip": ip})
-    if miss:
-        raise RuntimeError("cannot map master ips to pods: {} raw=/tmp/ddb_cluster_nodes.txt".format(miss))
-    return out
-
-# Added function to find non‑master DDB pods
-def find_ddb_non_masters():
-    """
-    Return a list of DDB pods that are not masters.
-
-    This function discovers all DDB pods running in the target namespace and
-    filters out any pods that are currently acting as masters. The return
-    format matches ``find_ddb_masters`` by producing a list of dicts with
-    ``pod`` and ``ip`` keys.
-
-    Since Redis cluster roles are determined via the ``cluster nodes``
-    command, we first reuse ``find_ddb_masters`` to build a set of master pod
-    names. We then retrieve all pod IP mappings from Kubernetes and select
-    pods whose name matches the configured DDB pod prefix but are not in the
-    master set.
-    """
-    # Get current masters so they can be excluded
-    masters = find_ddb_masters()
-    master_pods = {m["pod"] for m in masters}
-
-    # Build a reverse map pod->ip from the namespace
-    ip_map = get_ns_pod_ip_map(config.NS_TARGET)
-    pod_to_ip = {pod: ip for ip, pod in ip_map.items()}
-
-    # Determine all DDB pods by configured name prefix.
-    ddb_prefix = getattr(config, "DDB_POD_PREFIX", "dupf-ddb").lower()
-    ddb_pods = sorted(pod for pod in pod_to_ip if ddb_prefix in pod.lower())
-
-    # Filter out masters and build the result list
-    out = []
-    for pod in ddb_pods:
-        if pod in master_pods:
-            continue
-        ip = pod_to_ip.get(pod, "")
-        out.append({"pod": pod, "ip": ip})
-    return out
 
 
 def _normalize_shard_tag(shard):
@@ -85,39 +36,141 @@ def _normalize_shard_tag(shard):
     return "shd-{}".format(s)
 
 
+def _extract_shard_tag(pod_name):
+    m = re.search(r"(shd-\d+)", pod_name or "")
+    return m.group(1) if m else ""
+
+
 def _match_shard_pod(pod_name, shard_tag):
     p = (pod_name or "").lower()
     t = shard_tag.lower()
     return ("{}-".format(t) in p) or p.endswith(t)
 
 
+def _discover_ddb_pods():
+    """
+    Build one DDB topology snapshot and annotate each pod with role/shard.
+
+    Returns list[dict] where each item includes:
+    - pod
+    - ip
+    - role: master|slave
+    - shard: shd-N (if detectable from pod name, else "")
+    """
+    raw = _cluster_nodes_raw()
+    master_ips = _parse_master_ips(raw)
+    if len(master_ips) < int(config.EXPECTED_MASTER_COUNT):
+        raise RuntimeError("masters ips too few: {} raw=/tmp/ddb_cluster_nodes.txt".format(master_ips))
+
+    ip2pod = get_ns_pod_ip_map(config.NS_TARGET)
+    pod2ip = {pod: ip for ip, pod in ip2pod.items()}
+
+    ddb_prefix = getattr(config, "DDB_POD_PREFIX", "dupf-ddb").lower()
+    ddb_pods = sorted(pod for pod in pod2ip if ddb_prefix in pod.lower())
+
+    master_pods = []
+    miss = []
+    for ip in master_ips[:int(config.EXPECTED_MASTER_COUNT)]:
+        pod = ip2pod.get(ip)
+        if not pod:
+            miss.append(ip)
+            continue
+        master_pods.append(pod)
+    if miss:
+        raise RuntimeError("cannot map master ips to pods: {} raw=/tmp/ddb_cluster_nodes.txt".format(miss))
+
+    master_set = set(master_pods)
+    out = []
+    for pod in ddb_pods:
+        out.append({
+            "pod": pod,
+            "ip": pod2ip.get(pod, ""),
+            "role": "master" if pod in master_set else "slave",
+            "shard": _extract_shard_tag(pod),
+        })
+    return out
+
+
+def find_ddb_pods(role="all", shard=None, shard_scope="all"):
+    """
+    Generic DDB finder based on one topology snapshot.
+
+    role: all|master|slave
+    shard_scope:
+      - all: ignore shard
+      - in: only pods in provided shard
+      - not_in: only pods not in provided shard
+    """
+    role = (role or "all").strip().lower()
+    shard_scope = (shard_scope or "all").strip().lower()
+    if role not in ("all", "master", "slave"):
+        raise RuntimeError("invalid ddb role: {} (expect all|master|slave)".format(role))
+    if shard_scope not in ("all", "in", "not_in"):
+        raise RuntimeError("invalid ddb shard_scope: {} (expect all|in|not_in)".format(shard_scope))
+
+    shard_tag = _normalize_shard_tag(shard) if shard_scope != "all" else None
+    pods = _discover_ddb_pods()
+
+    def keep(x):
+        if role != "all" and x.get("role") != role:
+            return False
+        if shard_scope == "in":
+            return _match_shard_pod(x.get("pod", ""), shard_tag)
+        if shard_scope == "not_in":
+            return not _match_shard_pod(x.get("pod", ""), shard_tag)
+        return True
+
+    return [{"pod": x["pod"], "ip": x.get("ip", "")} for x in pods if keep(x)]
+
+
+def find_ddb_masters():
+    return find_ddb_pods(role="master")
+
+
+def find_ddb_non_masters():
+    return find_ddb_pods(role="slave")
+
+
 def find_ddb_shard_master(shard):
     """Find master pod in a specific DDB shard (e.g. shard='0' or 'shd-0')."""
-    shard_tag = _normalize_shard_tag(shard)
-    masters = find_ddb_masters()
-    hits = [m for m in masters if _match_shard_pod(m.get("pod", ""), shard_tag)]
+    hits = find_ddb_pods(role="master", shard=shard, shard_scope="in")
     if not hits:
-        raise RuntimeError("No DDB master found for shard {} in {}".format(shard_tag, [x.get("pod") for x in masters]))
+        raise RuntimeError("No DDB master found for shard {}".format(_normalize_shard_tag(shard)))
     if len(hits) > 1:
-        raise RuntimeError("Multiple DDB masters found for shard {}: {}".format(shard_tag, [x.get("pod") for x in hits]))
+        raise RuntimeError("Multiple DDB masters found for shard {}: {}".format(_normalize_shard_tag(shard), [x.get("pod") for x in hits]))
     return hits[0]
 
 
 def find_ddb_shard_slaves(shard):
     """Find slave pods in a specific DDB shard (e.g. shard='0' or 'shd-0')."""
-    shard_tag = _normalize_shard_tag(shard)
-    slaves = find_ddb_non_masters()
-    hits = [s for s in slaves if _match_shard_pod(s.get("pod", ""), shard_tag)]
+    hits = find_ddb_pods(role="slave", shard=shard, shard_scope="in")
     if not hits:
-        raise RuntimeError("No DDB slaves found for shard {} in {}".format(shard_tag, [x.get("pod") for x in slaves]))
+        raise RuntimeError("No DDB slaves found for shard {}".format(_normalize_shard_tag(shard)))
     return hits
+
 
 def find_ddb_other_shard_pods(shard):
     """Find all DDB pods that do not belong to the specified shard."""
-    shard_tag = _normalize_shard_tag(shard)
-    pods = find_ddb_masters() + find_ddb_non_masters()
-    hits = [x for x in pods if not _match_shard_pod(x.get("pod", ""), shard_tag)]
+    hits = find_ddb_pods(role="all", shard=shard, shard_scope="not_in")
     if not hits:
-        raise RuntimeError("No DDB pods found outside shard {}".format(shard_tag))
+        raise RuntimeError("No DDB pods found outside shard {}".format(_normalize_shard_tag(shard)))
     return hits
 
+
+def find_ddb_shard_master_peers(shard):
+    """
+    Find peers to isolate from target shard master:
+    - same shard slaves
+    - all pods from other shards (masters + slaves)
+    """
+    shard_tag = _normalize_shard_tag(shard)
+    pods = _discover_ddb_pods()
+    hits = []
+    for x in pods:
+        in_target_shard = _match_shard_pod(x.get("pod", ""), shard_tag)
+        if in_target_shard and x.get("role") == "master":
+            continue
+        hits.append({"pod": x.get("pod"), "ip": x.get("ip", "")})
+    if not hits:
+        raise RuntimeError("No DDB peers found for shard master isolation: {}".format(shard_tag))
+    return hits
