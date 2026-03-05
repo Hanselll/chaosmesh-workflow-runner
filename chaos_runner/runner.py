@@ -54,7 +54,11 @@ def main():
     wf_ns = wf.get("namespace") or config.WF_NAMESPACE
 
     wf_yaml, resolved = build(case, config)
-    wf_yaml = expand_network_chaos_to_component_pods(wf_yaml, config.NS_TARGET)
+
+    # NetworkChaos pod-group expansion is now opt-in to avoid overriding
+    # explicitly resolved finder targets (e.g. shard-scoped DDB pods).
+    if bool(case.get("network_expand_to_component_pods", False)):
+        wf_yaml = expand_network_chaos_to_component_pods(wf_yaml, config.NS_TARGET)
     case_ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
     case_log_path = "/tmp/chaos_case_{}_{}.log".format(wf_name, case_ts)
     case_log = CaseLogger(case_log_path)

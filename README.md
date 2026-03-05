@@ -57,7 +57,15 @@ python3 -m chaos_runner.runner --case chaos_runner/cases/xxx.yaml
 
 ### 1.4 NetworkChaos 目标扩展说明（新增）
 
-对于 NetworkChaos，runner 会将 `from/to` 中选中的 Pod 自动扩展为其所属组件的全部 Pod，再写入最终 workflow YAML。
+对于 NetworkChaos，runner 默认**不做**目标扩展，以保证 finder 解析结果被精确使用（例如 DDB 分片场景）。
+
+如需按组件扩展，可在 case 顶层显式开启：
+
+```yaml
+network_expand_to_component_pods: true
+```
+
+开启后，runner 会将 `from/to` 中选中的 Pod 扩展为其所属组件（或网络分组）的全部 Pod，再写入最终 workflow YAML。
 
 例如：
 

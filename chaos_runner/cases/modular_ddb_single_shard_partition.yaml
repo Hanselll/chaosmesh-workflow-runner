@@ -6,6 +6,9 @@ workflow:
 
 renderer: modular_chaos
 
+# 对分片级 finder 结果做精确注入，不进行组件级自动扩展
+network_expand_to_component_pods: false
+
 targets:
   # 指定分片：可写 0 或 shd-0
   - id: ddb_shard0_master

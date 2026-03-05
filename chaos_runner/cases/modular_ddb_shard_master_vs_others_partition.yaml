@@ -3,6 +3,9 @@ namespace: default
 
 mode: modular_chaos
 
+# 对分片级 finder 结果做精确注入，不进行组件级自动扩展
+network_expand_to_component_pods: false
+
 # 指定一个分片（如 0 / shd-0），将该分片 master 与以下集合做网络分区：
 # 1) 本分片的 slaves
 # 2) 其他分片全部 DDB 实例（masters + slaves）
