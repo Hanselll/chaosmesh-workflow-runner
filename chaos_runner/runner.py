@@ -25,6 +25,7 @@ from chaos_runner.executor.observer import (
     collect_pre_case_state,
     collect_post_case_state,
     extract_podchaos_target_pods,
+    extract_target_pods_from_resolved,
 )
 from chaos_runner.workflow_factory.postprocess import expand_network_chaos_to_component_pods
 from chaos_runner.tools.k8s import sh
@@ -75,8 +76,10 @@ def main():
     case_log.log("resolved targets: {}".format(resolved))
 
     podchaos_target_pods = extract_podchaos_target_pods(wf_yaml, config.NS_TARGET)
+    role_source_pods = extract_target_pods_from_resolved(resolved)
     case_log.log("podchaos selected pods: {}".format(podchaos_target_pods))
-    pre_state = collect_pre_case_state(config.NS_TARGET, podchaos_target_pods, case_log)
+    case_log.log("role-source target pods: {}".format(role_source_pods))
+    pre_state = collect_pre_case_state(config.NS_TARGET, podchaos_target_pods, role_source_pods, case_log)
 
     # ✅ dry-run：到此结束，不 kubectl apply
     if args.dry_run:

@@ -43,6 +43,22 @@ def extract_podchaos_target_pods(wf_yaml_text, namespace):
     return sorted(out)
 
 
+def extract_target_pods_from_resolved(resolved):
+    """Extract pod names from resolved target outputs for role-state scope."""
+    out = set()
+    for v in (resolved or {}).values():
+        if isinstance(v, dict):
+            pod = v.get("pod")
+            if pod:
+                out.add(pod)
+            continue
+        if isinstance(v, list):
+            for it in v:
+                if isinstance(it, dict) and it.get("pod"):
+                    out.add(it.get("pod"))
+    return sorted(out)
+
+
 def _get_pod_status_map(namespace, pod_names):
     data = json.loads(sh("kubectl -n {} get pod -o json".format(namespace)))
     out = {}
@@ -440,11 +456,11 @@ def _log_lmt_snapshot(case_log, lmt_state, phase):
         case_log.log("{}".format(table if table else "    <empty; raw=/tmp/lmt_raw_pty_multi.txt>"))
 
 
-def collect_pre_case_state(namespace, podchaos_target_pods, case_log):
+def collect_pre_case_state(namespace, podchaos_target_pods, role_source_pods, case_log):
     run_start = datetime.now(timezone.utc)
     if not podchaos_target_pods:
         case_log.log("[PRE] podchaos selected pods is empty")
-    involved_components = sorted({_component_of_pod(p) for p in podchaos_target_pods if _component_of_pod(p) != "other"})
+    involved_components = sorted({_component_of_pod(p) for p in (role_source_pods or []) if _component_of_pod(p) != "other"})
 
     pod_status = _get_pod_status_map(namespace, podchaos_target_pods)
     role_state = _collect_role_state(involved_components)
@@ -457,6 +473,7 @@ def collect_pre_case_state(namespace, podchaos_target_pods, case_log):
 
     return {
         "target_pods": podchaos_target_pods,
+        "role_source_pods": role_source_pods,
         "pre_pod_status": pod_status,
         "involved_components": involved_components,
         "run_start": run_start,

@@ -35,6 +35,7 @@ python3 -m chaos_runner.runner --case chaos_runner/cases/xxx.yaml
    - 所在节点（nodeName）
    - 若 Pod 在执行期间重建导致名字变化，会在 PRE/POST 对比中标注 `replaced_by=<new-pod-name>` 并显示新 Pod 节点
 2. 组件角色状态
+   - 角色状态以 `targets` 解析出的 Pod 列表作为组件范围（不是仅按最终进入 workflow 的 Pod）
    - DDB：masters / non-masters
    - RC：leader / followers
    - ETCD：leader / followers
