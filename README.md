@@ -126,7 +126,7 @@ targets:
     finder: upc_talker
 ```
 
-### 3.2 支持的 finder 一览（v13）
+### 3.2 支持的 finder 一览（v14）
 
 | finder | 返回类型 | 说明 | 额外字段 |
 |---|---|---|---|
@@ -143,6 +143,7 @@ targets:
 | `ddb_non_masters` | list[dict] | 解析 DDB 非 master pods | 无 |
 | `ddb_shard_master` | dict | 解析指定 DDB 分片中的 master | `shard: "0"` 或 `shard: "shd-0"` |
 | `ddb_shard_slaves` | list[dict] | 解析指定 DDB 分片中的 slaves | `shard: "0"` 或 `shard: "shd-0"` |
+| `ddb_other_shard_pods` | list[dict] | 解析除指定分片外的所有 DDB pods（含 master/slave） | `shard: "0"` 或 `shard: "shd-0"` |
 | `sdb_master` | dict | 解析 SDB 当前 master（单主 + 多从） | 无 |
 | `sdb_slaves` | list[dict] | 解析 SDB slave 列表 | 无 |
 | `sdb_sentinel_info` | dict | 解析 SDB sentinel 的 `info sentinel`（包含 master_address 等） | 无 |
@@ -176,6 +177,30 @@ targets:
 ```
 
 上述 finder 会动态识别目标分片中的 master，并把同分片其余实例作为 slaves 返回，可用于注入该分片内 1 主 2 从的网络故障。
+
+#### DDB 指定分片 master 与其他所有分片分区示例
+
+```yaml
+targets:
+  - id: ddb_shard0_master
+    finder: ddb_shard_master
+    shard: "0"
+
+  - id: ddb_other_shards
+    finder: ddb_other_shard_pods
+    shard: "0"
+
+chaos:
+  steps:
+    - id: partition_shard0_master_from_other_shards
+      action:
+        type: network_partition
+        params:
+          from: ddb_shard0_master
+          to: ddb_other_shards
+          direction: both
+          duration: 120s
+```
 
 ---
 

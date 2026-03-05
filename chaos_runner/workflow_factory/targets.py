@@ -9,6 +9,7 @@ from chaos_runner.discover.ddb import (
     find_ddb_non_masters,
     find_ddb_shard_master,
     find_ddb_shard_slaves,
+    find_ddb_other_shard_pods,
 )
 from chaos_runner.discover.sdb import (
     find_sdb_master,
@@ -95,6 +96,11 @@ def resolve_targets(case):
             if shard is None or str(shard).strip() == "":
                 raise RuntimeError("finder=ddb_shard_slaves requires 'shard' field in target {}".format(tid))
             resolved[tid] = find_ddb_shard_slaves(shard)
+        elif finder == "ddb_other_shard_pods":
+            shard = t.get("shard")
+            if shard is None or str(shard).strip() == "":
+                raise RuntimeError("finder=ddb_other_shard_pods requires 'shard' field in target {}".format(tid))
+            resolved[tid] = find_ddb_other_shard_pods(shard)
         elif finder == "sdb_master":
             # Resolve the master pod of the SDB Redis cluster.  Returns a
             # single dict with ``pod`` and ``ip`` keys.

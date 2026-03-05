@@ -111,3 +111,13 @@ def find_ddb_shard_slaves(shard):
     if not hits:
         raise RuntimeError("No DDB slaves found for shard {} in {}".format(shard_tag, [x.get("pod") for x in slaves]))
     return hits
+
+def find_ddb_other_shard_pods(shard):
+    """Find all DDB pods that do not belong to the specified shard."""
+    shard_tag = _normalize_shard_tag(shard)
+    pods = find_ddb_masters() + find_ddb_non_masters()
+    hits = [x for x in pods if not _match_shard_pod(x.get("pod", ""), shard_tag)]
+    if not hits:
+        raise RuntimeError("No DDB pods found outside shard {}".format(shard_tag))
+    return hits
+
