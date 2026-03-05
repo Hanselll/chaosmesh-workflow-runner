@@ -19,6 +19,7 @@ LMT_PORT = 8153
 UPC_PODNAME_HINT = "upc"
 
 DDB_EXEC_POD = "dupf-ddb-shd-0-0"
+DDB_POD_PREFIX = "dupf-ddb"
 REDIS_PORT = 17380
 REDIS_AUTH = 'px!2eZ{ys[r3d5eR'
 EXPECTED_MASTER_COUNT = 3

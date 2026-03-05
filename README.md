@@ -11,6 +11,79 @@
 python3 -m chaos_runner.runner --case chaos_runner/cases/xxx.yaml
 ```
 
+### 1.1 观测日志（新增）
+
+从当前版本开始，runner 会在 **执行 case 前后自动采集并记录观测信息**，日志文件路径会在启动时打印：
+
+```text
+[INFO] case-log: /tmp/chaos_case_<workflow-name>_<timestamp>.log
+```
+
+日志行带毫秒时间戳，格式示例：
+
+```text
+[2026-03-05 10:31:22.123] [PRE] pod status/node={...}
+```
+
+### 1.2 日志中包含哪些信息
+
+每次执行会记录以下内容（PRE/POST 各一份）：
+
+1. PodChaos 相关 Pod 信息（仅统计 PodChaos 最终选中的 Pod，不包含 NetworkChaos 选中的 Pod）
+   - Pod 名称
+   - Pod 运行状态（phase）
+   - 所在节点（nodeName）
+   - 若 Pod 在执行期间重建导致名字变化，会在 PRE/POST 对比中标注 `replaced_by=<new-pod-name>` 并显示新 Pod 节点
+2. 组件角色状态
+   - 角色状态以 `targets` 解析出的 Pod 列表作为组件范围（不是仅按最终进入 workflow 的 Pod）
+   - DDB：masters / non-masters
+   - RC：leader / followers
+   - ETCD：leader / followers
+3. 业务侧 LMT 信息（在 OAM 容器内执行）
+   - 使用 table 形式采集（`--format table`）
+   - 日志顺序为：先打印所有 PRE 表格，再打印所有 POST 表格
+   - `lmt-cli list upfGetTalkerRole --format table`
+   - `lmt-cli list upfGetNodeAssociateInfo --format table`
+   - `lmt-cli list upfGetLicenseUsage --format table`
+   - `lmt-cli list upfGetSessionNum --format table`
+   - `lmt-cli list upfGetUpcSessionNum --format table`
+   - `lmt-cli list upfGetUpuInstanceStatus --format table`
+   - `lmt-cli list upfGetWholeMachineRate --format table`
+   - `lmt-cli list upfGetUpuForwardRate --format table`
+   - `lmt-cli list upfGetRoleInterfaceRate --format table`
+4. 与 PodChaos 目标 Pod 相关的 k8s 事件
+   - 仅在 POST 记录本次执行期间产生的事件（不再记录 PRE 基线）
+   - 若目标 Pod 被重建并更名，也会一并记录新 Pod 相关事件
+
+### 1.4 NetworkChaos 目标扩展说明（新增）
+
+对于 NetworkChaos，runner 默认**不做**目标扩展，以保证 finder 解析结果被精确使用（例如 DDB 分片场景）。
+
+如需按组件扩展，可在 case 顶层显式开启：
+
+```yaml
+network_expand_to_component_pods: true
+```
+
+开启后，runner 会将 `from/to` 中选中的 Pod 扩展为其所属组件（或网络分组）的全部 Pod，再写入最终 workflow YAML。
+
+例如：
+
+- `from` 里是单个 etcd Pod，会扩展为所有 etcd Pod；
+- `to` 里是单个 upc-lb Pod，会扩展为所有 upc-lb Pod（同理 upu 只扩展到 upu 组）。
+
+注意：扩展是按 `from`/`to` 各自目标组分别进行，NetworkChaos 仅发生在这两组目标之间，不会扩展为 namespace 内所有 Pod 两两互通故障。
+
+### 1.3 推荐查看方式
+
+```bash
+# 实时查看本次 case 日志
+tail -f /tmp/chaos_case_<workflow-name>_<timestamp>.log
+
+# 快速定位事件记录
+grep "Runtime Target Events" -n /tmp/chaos_case_<workflow-name>_<timestamp>.log
+```
+
 常用字段：
 
 - `wait_seconds`: runner 等待 workflow 运行的时间（秒）
@@ -61,7 +134,7 @@ targets:
     finder: upc_talker
 ```
 
-### 3.2 支持的 finder 一览（v13）
+### 3.2 支持的 finder 一览（v15）
 
 | finder | 返回类型 | 说明 | 额外字段 |
 |---|---|---|---|
@@ -76,6 +149,11 @@ targets:
 | `etcd_pods` | list[dict] | 解析所有 etcd pods | 无 |
 | `ddb_masters` | list[dict] | 解析 DDB（Redis Cluster）masters | 无 |
 | `ddb_non_masters` | list[dict] | 解析 DDB 非 master pods | 无 |
+| `ddb_pods` | list[dict] | 通用 DDB finder：按角色/分片范围过滤 | `role`(`all/master/slave`)、`shard_scope`(`all/in/not_in`)、`shard` |
+| `ddb_shard_master` | dict | 解析指定 DDB 分片中的 master | `shard: "0"` 或 `shard: "shd-0"` |
+| `ddb_shard_slaves` | list[dict] | 解析指定 DDB 分片中的 slaves | `shard: "0"` 或 `shard: "shd-0"` |
+| `ddb_other_shard_pods` | list[dict] | 解析除指定分片外的所有 DDB pods（含 master/slave） | `shard: "0"` 或 `shard: "shd-0"` |
+| `ddb_shard_master_peers` | list[dict] | 指定分片 master 的分区对端集合（本分片 slaves + 其他分片全部） | `shard: "0"` 或 `shard: "shd-0"` |
 | `sdb_master` | dict | 解析 SDB 当前 master（单主 + 多从） | 无 |
 | `sdb_slaves` | list[dict] | 解析 SDB slave 列表 | 无 |
 | `sdb_sentinel_info` | dict | 解析 SDB sentinel 的 `info sentinel`（包含 master_address 等） | 无 |
@@ -94,6 +172,65 @@ targets:
 
 > 注意：`label` 必须是 `"key: value"` 形式（有冒号）。  
 > 部分 renderer 的 `network.labels` 支持 `"key=value"`，但 **targets.by_label 不支持**。
+
+#### DDB 单分片动态识别示例（不使用 by_label）
+
+```yaml
+targets:
+  - id: ddb_shard0_master
+    finder: ddb_shard_master
+    shard: "0"       # 或 "shd-0"
+
+  - id: ddb_shard0_slaves
+    finder: ddb_shard_slaves
+    shard: "0"
+```
+
+上述 finder 会动态识别目标分片中的 master，并把同分片其余实例作为 slaves 返回，可用于注入该分片内 1 主 2 从的网络故障。
+
+#### DDB 指定分片 master 与“本分片 slaves + 其他分片全部”分区示例
+
+```yaml
+targets:
+  - id: ddb_shard0_master
+    finder: ddb_shard_master
+    shard: "0"
+
+  - id: ddb_shard0_master_peers
+    finder: ddb_shard_master_peers
+    shard: "0"
+
+chaos:
+  steps:
+    - id: partition_shard0_master_from_peers
+      action:
+        type: network_partition
+        params:
+          from: ddb_shard0_master
+          to: ddb_shard0_master_peers
+          direction: both
+          duration: 120s
+```
+
+#### 通用 DDB finder（更高效的组合方式）
+
+`ddb_pods` 支持在一次 DDB 拓扑快照上做组合过滤，减少为不同 finder 重复发现的开销。
+
+```yaml
+# 例1：指定分片 slaves
+- id: shard0_slaves
+  finder: ddb_pods
+  role: slave
+  shard_scope: in
+  shard: "0"
+
+# 例2：其他分片全部 pods
+- id: other_shards_all
+  finder: ddb_pods
+  role: all
+  shard_scope: not_in
+  shard: "0"
+```
 
 ---
 

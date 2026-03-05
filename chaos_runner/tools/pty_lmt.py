@@ -51,6 +51,14 @@ def run_lmt_list_in_container(namespace, pod, container, login_ip, login_port, u
 
     send("export HOME=/tmp\n")
     out += read_until(master_fd, r".*", timeout=1)
+    # disable terminal echo to avoid marker text being echoed before command finishes
+    send("stty -echo\n")
+    out += read_until(master_fd, r".*", timeout=1)
+    send("export PS1='__PROMPT__# '\n")
+    out += read_until(master_fd, r"__PROMPT__#", timeout=3)
+    # avoid echoed input lines polluting parsed command output
+    send("stty -echo\n")
+    out += read_until(master_fd, r".*", timeout=1)
 
     send("lmt-cli login --ip {} --port {} --username {}\n".format(login_ip, login_port, username))
     out += read_until(master_fd, r"(Enter Password:|Password:)", timeout=8)
@@ -70,3 +78,90 @@ def run_lmt_list_in_container(namespace, pod, container, login_ip, login_port, u
     except Exception: pass
     open(raw_out_path,"w").write(out)
     return out
+
+
+def run_lmt_commands_in_container(
+    namespace,
+    pod,
+    container,
+    login_ip,
+    login_port,
+    username,
+    password,
+    commands,
+    raw_out_path="/tmp/lmt_raw_pty_multi.txt",
+):
+    """Login once then execute commands in interactive PTY.
+
+    Returns:
+        {
+          "raw_output": "...",
+          "results": [{"command": "...", "output": "..."}, ...]
+        }
+    """
+    master_fd, slave_fd = pty.openpty()
+    set_nonblocking(master_fd)
+
+    cmd = ["kubectl", "exec", "-it", "-n", namespace, pod, "-c", container, "--", "bash", "--noprofile", "--norc"]
+    proc = subprocess.Popen(cmd, stdin=slave_fd, stdout=slave_fd, stderr=slave_fd, close_fds=True)
+    os.close(slave_fd)
+
+    def send(s):
+        os.write(master_fd, s.encode())
+
+    out = read_until(master_fd, r".*", timeout=1)
+    send("echo __READY__\n")
+    out += read_until(master_fd, r"__READY__", timeout=8)
+    if "__READY__" not in out:
+        open(raw_out_path, "w").write(out)
+        raise RuntimeError("no __READY__ raw={}".format(raw_out_path))
+
+    send("export HOME=/tmp\n")
+    out += read_until(master_fd, r".*", timeout=1)
+    send("stty -echo\n")
+    out += read_until(master_fd, r".*", timeout=1)
+    send("export PS1='__PROMPT__# '\n")
+    out += read_until(master_fd, r"__PROMPT__#", timeout=3)
+
+    send("lmt-cli login --ip {} --port {} --username {}\n".format(login_ip, login_port, username))
+    out += read_until(master_fd, r"(Enter Password:|Password:)", timeout=8)
+    send(password + "\n")
+    out += read_until(master_fd, r"(login success|login failed|status:)", timeout=10)
+    if "login success" not in out:
+        open(raw_out_path, "w").write(out)
+        raise RuntimeError("lmt login failed raw={}".format(raw_out_path))
+
+    results = []
+    for idx, command in enumerate(commands):
+        begin = "__CMD_BEGIN_{}__".format(idx)
+        end = "__CMD_DONE_{}__".format(idx)
+        send("printf '{b}\\n'; {cmd}; printf '\\n{e}\\n'\n".format(b=begin, cmd=command, e=end))
+        # LMT table output may take longer in busy env; use larger timeout.
+        chunk = read_until(master_fd, re.escape(end), timeout=90)
+        out += chunk
+
+        # Prefer parsing the current chunk first; fallback to accumulated output.
+        ei = chunk.rfind(end)
+        bi = chunk.rfind(begin, 0, ei if ei >= 0 else None)
+        seg = ""
+        if bi >= 0 and ei > bi:
+            seg = chunk[bi + len(begin):ei]
+        else:
+            ei2 = out.rfind(end)
+            bi2 = out.rfind(begin, 0, ei2 if ei2 >= 0 else None)
+            if bi2 >= 0 and ei2 > bi2:
+                seg = out[bi2 + len(begin):ei2]
+            elif ei >= 0:
+                seg = chunk[:ei]
+        results.append({"command": command, "output": seg.strip()})
+
+    send("exit\n")
+    send("exit\n")
+    time.sleep(0.2)
+    proc.terminate()
+    try:
+        os.close(master_fd)
+    except Exception:
+        pass
+    open(raw_out_path, "w").write(out)
+    return {"raw_output": out, "results": results}
