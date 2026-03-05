@@ -4,7 +4,12 @@ from chaos_runner.discover.upc import find_upc_talker, find_upc_non_talkers, fin
 #from chaos_runner.discover.rc import fetch_rc_health, find_rc_leader
 import chaos_runner.discover.rc as rc_discover
 from chaos_runner.discover.pods import find_pods_by_label
-from chaos_runner.discover.ddb import find_ddb_masters, find_ddb_non_masters
+from chaos_runner.discover.ddb import (
+    find_ddb_masters,
+    find_ddb_non_masters,
+    find_ddb_shard_master,
+    find_ddb_shard_slaves,
+)
 from chaos_runner.discover.sdb import (
     find_sdb_master,
     find_sdb_slaves,
@@ -80,6 +85,16 @@ def resolve_targets(case):
             resolved[tid]=find_ddb_masters()
         elif finder=="ddb_non_masters":
             resolved[tid] = find_ddb_non_masters()
+        elif finder == "ddb_shard_master":
+            shard = t.get("shard")
+            if shard is None or str(shard).strip() == "":
+                raise RuntimeError("finder=ddb_shard_master requires 'shard' field in target {}".format(tid))
+            resolved[tid] = find_ddb_shard_master(shard)
+        elif finder == "ddb_shard_slaves":
+            shard = t.get("shard")
+            if shard is None or str(shard).strip() == "":
+                raise RuntimeError("finder=ddb_shard_slaves requires 'shard' field in target {}".format(tid))
+            resolved[tid] = find_ddb_shard_slaves(shard)
         elif finder == "sdb_master":
             # Resolve the master pod of the SDB Redis cluster.  Returns a
             # single dict with ``pod`` and ``ip`` keys.

@@ -51,7 +51,8 @@ def find_ddb_non_masters():
     Since Redis cluster roles are determined via the ``cluster nodes``
     command, we first reuse ``find_ddb_masters`` to build a set of master pod
     names. We then retrieve all pod IP mappings from Kubernetes and select
-    pods whose name contains ``dupf-ddb`` but are not in the master set.
+    pods whose name matches the configured DDB pod prefix but are not in the
+    master set.
     """
     # Get current masters so they can be excluded
     masters = find_ddb_masters()
@@ -61,10 +62,9 @@ def find_ddb_non_masters():
     ip_map = get_ns_pod_ip_map(config.NS_TARGET)
     pod_to_ip = {pod: ip for ip, pod in ip_map.items()}
 
-    # Determine all DDB pods by name pattern. The convention is that DDB pods
-    # include "dupf-ddb" in their name (e.g. ``dupf-ddb-shd-0-0``). If this
-    # convention changes, update the substring accordingly.
-    ddb_pods = [pod for pod in pod_to_ip if "dupf-ddb" in pod]
+    # Determine all DDB pods by configured name prefix.
+    ddb_prefix = getattr(config, "DDB_POD_PREFIX", "dupf-ddb").lower()
+    ddb_pods = sorted(pod for pod in pod_to_ip if ddb_prefix in pod.lower())
 
     # Filter out masters and build the result list
     out = []
@@ -74,3 +74,40 @@ def find_ddb_non_masters():
         ip = pod_to_ip.get(pod, "")
         out.append({"pod": pod, "ip": ip})
     return out
+
+
+def _normalize_shard_tag(shard):
+    s = str(shard).strip()
+    if not s:
+        raise RuntimeError("ddb shard is empty")
+    if s.startswith("shd-"):
+        return s
+    return "shd-{}".format(s)
+
+
+def _match_shard_pod(pod_name, shard_tag):
+    p = (pod_name or "").lower()
+    t = shard_tag.lower()
+    return ("{}-".format(t) in p) or p.endswith(t)
+
+
+def find_ddb_shard_master(shard):
+    """Find master pod in a specific DDB shard (e.g. shard='0' or 'shd-0')."""
+    shard_tag = _normalize_shard_tag(shard)
+    masters = find_ddb_masters()
+    hits = [m for m in masters if _match_shard_pod(m.get("pod", ""), shard_tag)]
+    if not hits:
+        raise RuntimeError("No DDB master found for shard {} in {}".format(shard_tag, [x.get("pod") for x in masters]))
+    if len(hits) > 1:
+        raise RuntimeError("Multiple DDB masters found for shard {}: {}".format(shard_tag, [x.get("pod") for x in hits]))
+    return hits[0]
+
+
+def find_ddb_shard_slaves(shard):
+    """Find slave pods in a specific DDB shard (e.g. shard='0' or 'shd-0')."""
+    shard_tag = _normalize_shard_tag(shard)
+    slaves = find_ddb_non_masters()
+    hits = [s for s in slaves if _match_shard_pod(s.get("pod", ""), shard_tag)]
+    if not hits:
+        raise RuntimeError("No DDB slaves found for shard {} in {}".format(shard_tag, [x.get("pod") for x in slaves]))
+    return hits

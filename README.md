@@ -141,6 +141,8 @@ targets:
 | `etcd_pods` | list[dict] | 解析所有 etcd pods | 无 |
 | `ddb_masters` | list[dict] | 解析 DDB（Redis Cluster）masters | 无 |
 | `ddb_non_masters` | list[dict] | 解析 DDB 非 master pods | 无 |
+| `ddb_shard_master` | dict | 解析指定 DDB 分片中的 master | `shard: "0"` 或 `shard: "shd-0"` |
+| `ddb_shard_slaves` | list[dict] | 解析指定 DDB 分片中的 slaves | `shard: "0"` 或 `shard: "shd-0"` |
 | `sdb_master` | dict | 解析 SDB 当前 master（单主 + 多从） | 无 |
 | `sdb_slaves` | list[dict] | 解析 SDB slave 列表 | 无 |
 | `sdb_sentinel_info` | dict | 解析 SDB sentinel 的 `info sentinel`（包含 master_address 等） | 无 |
@@ -159,6 +161,21 @@ targets:
 
 > 注意：`label` 必须是 `"key: value"` 形式（有冒号）。  
 > 部分 renderer 的 `network.labels` 支持 `"key=value"`，但 **targets.by_label 不支持**。
+
+#### DDB 单分片动态识别示例（不使用 by_label）
+
+```yaml
+targets:
+  - id: ddb_shard0_master
+    finder: ddb_shard_master
+    shard: "0"       # 或 "shd-0"
+
+  - id: ddb_shard0_slaves
+    finder: ddb_shard_slaves
+    shard: "0"
+```
+
+上述 finder 会动态识别目标分片中的 master，并把同分片其余实例作为 slaves 返回，可用于注入该分片内 1 主 2 从的网络故障。
 
 ---
 
