@@ -157,7 +157,8 @@ targets:
 | `sdb_master` | dict | 解析 SDB 当前 master（单主 + 多从） | 无 |
 | `sdb_slaves` | list[dict] | 解析 SDB slave 列表 | 无 |
 | `sdb_sentinel_info` | dict | 解析 SDB sentinel 的 `info sentinel`（包含 master_address 等） | 无 |
-| `by_label` | list[dict] | 根据 label 找 pods | `label: "key: value"` |
+| `by_label` | list[dict] | 根据 label 精确匹配 pods | `label: "key: value"` |
+| `by_label_prefix` | list[dict] | 根据 label 值前缀匹配 pods（适合 `dupf-pod-upu-*`） | `label_prefix: "key: prefix"`（也兼容 `label`） |
 
 `dict` 典型结构：`{"pod": "<pod-name>", "ip": "<pod-ip>"}`  
 `list[dict]` 为上述 dict 的列表。
@@ -172,6 +173,18 @@ targets:
 
 > 注意：`label` 必须是 `"key: value"` 形式（有冒号）。  
 > 部分 renderer 的 `network.labels` 支持 `"key=value"`，但 **targets.by_label 不支持**。
+
+
+#### finder=by_label_prefix 示例（UPU 推荐）
+
+```yaml
+- id: upu_pool
+  finder: by_label_prefix
+  label_prefix: "app.kubernetes.io/component: dupf-pod-upu-"
+```
+
+该写法会匹配 `dupf-pod-upu-1`、`dupf-pod-upu-2` ... 等所有 UPU 实例。
+随后可配合 `expand.mode: random` 随机选取一个 UPU 注入故障。
 
 #### DDB 单分片动态识别示例（不使用 by_label）
 
@@ -236,7 +249,7 @@ chaos:
 
 ## 4. Expand 语法（精细控制“从列表目标里选哪些 Pod”）
 
-当某个 target 解析结果是 `list[dict]` 时（例如 `ddb_masters`、`sdb_slaves`、`by_label`），你可以用 `expand` 指定选取策略。
+当某个 target 解析结果是 `list[dict]` 时（例如 `ddb_masters`、`sdb_slaves`、`by_label`、`by_label_prefix`），你可以用 `expand` 指定选取策略。
 
 目前支持：
 
@@ -1049,6 +1062,27 @@ cleanup: true
 2. **检查 kill fault 是否有边界时长**：建议为 `pod_kill/container_kill` 显式写 `duration: 1s`。
 3. **检查 `wait_seconds` 是否覆盖总时长**：建议 ≥ 所有 stage 关键故障持续时间之和 + 余量。
 4. **确认 target 解析是否稳定**：`expand.mode=random` 每次可能选不同 pod，排障时可加 `seed` 固定选择。
+
+#### 7.7.8 新增 case（分区 + 分阶段 kill）
+
+仓库已补充以下 `modular_chaos` 用例，可直接运行：
+
+- `chaos_runner/cases/modular_partition_ddb_with_upc_upu_upclb_kill.yaml`
+  - DDB：`ddb_shard_master(shard=0)` 与 `ddb_shard_master_peers(shard=0)` 分区
+  - 同时对 `upc_talker` + 随机 1 个 `upu_pool` + 随机 1 个 `upc_lb_pool` 做 stage-1 `container_kill`、stage-2 `pod_kill`。
+- `chaos_runner/cases/modular_partition_sdb_with_upc_upu_upclb_kill.yaml`
+- `chaos_runner/cases/modular_partition_rc_with_upc_upu_upclb_kill.yaml`
+- `chaos_runner/cases/modular_partition_rc_etcd_with_upc_upu_upclb_kill.yaml`
+- `chaos_runner/cases/modular_partition_sentinel_with_sdbmaster_upc_upu_upclb_kill.yaml`
+  - Sentinel ↔ SDB Master 分区，并对主用 `sdb_master` 分 stage 执行 `container_kill` + `pod_kill`。
+
+上述 case 中 UPU 目标统一使用：
+
+```yaml
+- id: upu_pool
+  finder: by_label_prefix
+  label_prefix: "app.kubernetes.io/component: dupf-pod-upu-"
+```
 
 #### 可扩展性说明
 
