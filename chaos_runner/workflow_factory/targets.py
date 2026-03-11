@@ -3,7 +3,7 @@ from chaos_runner.discover.upc import find_upc_talker, find_upc_non_talkers, fin
 #from chaos_runner.discover.rc import fetch_cluster_state, find_rc_leader
 #from chaos_runner.discover.rc import fetch_rc_health, find_rc_leader
 import chaos_runner.discover.rc as rc_discover
-from chaos_runner.discover.pods import find_pods_by_label
+from chaos_runner.discover.pods import find_pods_by_label, find_pods_by_label_prefix
 from chaos_runner.discover.ddb import (
     find_ddb_masters,
     find_ddb_non_masters,
@@ -134,6 +134,13 @@ def resolve_targets(case):
             if not label_kv:
                 raise RuntimeError(f"finder=by_label requires 'label' field in target {tid}")
             resolved[tid] = find_pods_by_label(label_kv)
+        elif finder == "by_label_prefix":
+            # 从 target 配置中读取 label 前缀，例如
+            # "app.kubernetes.io/component: dupf-pod-upu-"，匹配所有 upu-*。
+            label_prefix = t.get("label_prefix") or t.get("label")
+            if not label_prefix:
+                raise RuntimeError(f"finder=by_label_prefix requires 'label_prefix' (or 'label') field in target {tid}")
+            resolved[tid] = find_pods_by_label_prefix(label_prefix)
         else:
             raise RuntimeError("Unknown finder: {}".format(finder))
 
