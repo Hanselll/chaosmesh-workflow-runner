@@ -7,10 +7,15 @@ workflow:
 renderer: modular_chaos
 
 targets:
-  - id: ddb_masters
-    finder: ddb_masters
-  - id: ddb_non_masters
-    finder: ddb_non_masters
+  # 一个分片的 master（可改为 1/2...）
+  - id: ddb_shard_master
+    finder: ddb_shard_master
+    shard: "0"
+
+  # 本分片 slave + 其他分片全部 master/slave
+  - id: ddb_shard_master_peers
+    finder: ddb_shard_master_peers
+    shard: "0"
 
   - id: upc_talker
     finder: upc_talker
@@ -26,8 +31,8 @@ stages:
     faults:
       - type: network_partition
         selectors:
-          from: ddb_masters
-          to: ddb_non_masters
+          from: ddb_shard_master
+          to: ddb_shard_master_peers
         direction: both
         duration: 60s
 
@@ -59,8 +64,8 @@ stages:
     faults:
       - type: network_partition
         selectors:
-          from: ddb_masters
-          to: ddb_non_masters
+          from: ddb_shard_master
+          to: ddb_shard_master_peers
         direction: both
         duration: 60s
 
