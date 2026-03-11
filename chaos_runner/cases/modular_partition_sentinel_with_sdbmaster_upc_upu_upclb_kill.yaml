@@ -16,8 +16,8 @@ targets:
   - id: upc_talker
     finder: upc_talker
   - id: upu_pool
-    finder: by_label
-    label: "app.kubernetes.io/component: dupf-pod-upu"
+    finder: by_label_prefix
+    label_prefix: "app.kubernetes.io/component: dupf-pod-upu-"
   - id: upc_lb_pool
     finder: by_label
     label: "app.kubernetes.io/dupf.service: dupf-pod-upc-lb"
