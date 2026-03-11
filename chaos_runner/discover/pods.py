@@ -1,4 +1,6 @@
 # chaos_runner/discover/pods.py
+import json
+
 from chaos_runner.tools.k8s import sh, get_pod_ip
 from chaos_runner import config
 
@@ -38,20 +40,18 @@ def find_pods_by_label_prefix(label_kv_prefix: str):
     key, prefix = [part.strip() for part in label_kv_prefix.split(":", 1)]
 
     # 先按 key 过滤，避免拉取 namespace 全量 Pod。
-    cmd = (
-        f"kubectl -n {config.NS_TARGET} get pod -l {key} "
-        f"-o jsonpath='{{range .items[*]}}{{.metadata.name}}\\t{{index .metadata.labels \"{key}\"}}\\n{{end}}'"
-    )
-    raw = sh(cmd)
+    # 这里使用 -o json 后在 Python 里解析，避免复杂 jsonpath 在不同 kubectl 版本上的兼容问题。
+    raw = sh(f"kubectl -n {config.NS_TARGET} get pod -l {key} -o json")
+    data = json.loads(raw or "{}")
 
     pods = []
-    for line in (raw or "").splitlines():
-        line = line.strip()
-        if not line:
+    for item in data.get("items", []):
+        md = item.get("metadata") or {}
+        pod = (md.get("name") or "").strip()
+        labels = md.get("labels") or {}
+        val = str(labels.get(key, "")).strip()
+        if not pod:
             continue
-        parts = line.split("\t", 1)
-        pod = parts[0].strip()
-        val = parts[1].strip() if len(parts) > 1 else ""
         if val.startswith(prefix):
             ip = get_pod_ip(config.NS_TARGET, pod)
             pods.append({"pod": pod, "ip": ip})
